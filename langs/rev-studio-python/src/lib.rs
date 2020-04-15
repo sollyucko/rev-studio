@@ -1,14 +1,27 @@
+// Based on:
+//  https://nedbatchelder.com/blog/200804/the_structure_of_pyc_files.html
+//  https://github.com/python/cpython/blob/master/Lib/importlib/_bootstrap_external.py
+//  https://github.com/python/cpython/blob/master/Lib/dis.py
+//  https://github.com/python/cpython/blob/master/Lib/opcode.py
+//  https://github.com/python/cpython/blob/master/Python/compile.c
+//  https://github.com/python/cpython/blob/master/Python/ceval.c
+//  https://docs.python.org/X.X/library/dis.html
+// Other tools:
+//  https://regexr.com/
+
 #![allow(dead_code)]
 
-use bitfield::{bitfield, Bit};
+use bitfield::bitfield;
 use pyo3::{
-    ffi::{PyCodeObject, PyCode_Type, Py_INCREF},
+    ffi,
     marshal::loads,
-    AsPyPointer, Py, PyDowncastError, PyErr, Python,
+    AsPyPointer, PyDowncastError, PyErr, Python,
 };
 
-use std::io::{self, BufRead, Cursor, Seek, SeekFrom};
+use std::io::{self, BufRead, Seek, SeekFrom};
 use std::time::{Duration, SystemTime};
+
+pub mod instructions;
 
 macro_rules! union {
     ($vis:vis $name:ident $([$attr:meta])* $($variant:ident($type:ty),)+) => {
@@ -48,13 +61,6 @@ bitfield! {
     pub is_check_source, _: 1;
 }
 
-// Based on:
-//  https://nedbatchelder.com/blog/200804/the_structure_of_pyc_files.html
-//  https://github.com/python/cpython/blob/master/Lib/importlib/_bootstrap_external.py
-//  https://github.com/python/cpython/blob/master/Lib/dis.py
-// Other tools:
-//  https://regexr.com/
-
 // TODO (eventually): different for different Python versions -> enum?
 pub struct PycMetadata {
     pub version: &'static str,
@@ -63,12 +69,12 @@ pub struct PycMetadata {
     pub source_size: u32,
 }
 
-pub struct Pyc {
+pub struct Pyc<'a> {
     metadata: PycMetadata,
-    code: PyCodeObject,
+    code: MyPyCodeObject<'a>,
 }
 
-impl Pyc {
+impl Pyc<'_> {
     fn is_likely_valid<F: BufRead + Seek>(f: &mut F) -> PycResult<()> {
         Pyc::read_metadata(f)?;
         Ok(())
@@ -215,111 +221,318 @@ impl Pyc {
         f.read_to_end(&mut code_buffer)?;
         let gil_guard = Python::acquire_gil();
         let py = gil_guard.python();
-        let code_ptr = loads(py, &code_buffer).unwrap().as_ptr();
-        let code = unsafe {
-            // I hope this is valid...
-            Py_INCREF(code_ptr);
-            *(code_ptr as *mut PyCodeObject)
-        };
+
+        let code_ptr = loads(py, &code_buffer)?.as_ptr() as *mut ffi::PyCodeObject;
+        // This should be valid, since ffi::PyCodeObject is Copy, as long as the refcount is positive
+        // (effectively until the end of this scope)
+        let raw_code = unsafe { *code_ptr };
+        let code = panic!(); // TODO: convert raw_code to code
         Ok(Pyc { metadata, code })
     }
 }
 
-// Can't use custom discriminants because some variants have arguments
-// TODO: finish list of current instructions
 // TODO: add past instructions
 #[allow(non_camel_case_types)]
-enum Instruction {
-    _0,
-    POP_TOP,     // 1
-    ROT_TWO,     // 2
-    ROT_THREE,   // 3
-    DUP_TOP,     // 4
-    DUP_TOP_TWO, // 5
-    ROT_FOUR,    // 6
-    _7,
-    _8,
-    NOP,            // 9
-    UNARY_POSITIVE, // 10
-    UNARY_NEGATIVE, // 11
-    UNARY_NOT,      // 12
-    _13,
-    _14,
-    UNARY_INVERT,            // 15
-    BINARY_MATRIX_MULTIPLY,  // 16
-    INPLACE_MATRIX_MULTIPLY, // 17
-    _18,
-    BINARY_POWER,    // 19
-    BINARY_MULTIPLY, // 20
-    _21,
-    BINARY_MODULO,        // 22
-    BINARY_ADD,           // 23
-    BINARY_SUBTRACT,      // 24
-    BINARY_SUBSCR,        // 25
-    BINARY_FLOOR_DIVIDE,  // 26
-    BINARY_TRUE_DIVIDE,   // 27
-    INPLACE_FLOOR_DIVIDE, // 28
-    INPLACE_TRUE_DIVIDE,  // 29
-    _30,
-    _31,
-    _32,
-    _33,
-    _34,
-    _35,
-    _36,
-    _37,
-    _38,
-    _39,
-    _40,
-    _41,
-    _42,
-    _43,
-    _44,
-    _45,
-    _46,
-    _47,
-    RERAISE,           // 48
-    WITH_EXCEPT_START, // 49
-    GET_AITER,         // 50
-    GET_ANEXT,         // 51
-    BEFORE_ASYNC_WITH, // 52
-    _53,
-    END_ASYNC_FOR,    // 54
-    INPLACE_ADD,      // 55
-    INPLACE_SUBTRACT, // 56
-    INPLACE_MULTIPLY, // 57
-    _58,
-    INPLACE_MODULO,       // 59
-    STORE_SUBSCR,         // 60
-    DELETE_SUBSCR,        // 61
-    BINARY_LSHIFT,        // 62
-    BINARY_RSHIFT,        // 63
-    BINARY_AND,           // 64
-    BINARY_XOR,           // 65
-    BINARY_OR,            // 66
-    INPLACE_POWER,        // 67
-    GET_ITER,             // 68
-    GET_YIELD_FROM_ITER,  // 69
-    PRINT_EXPR,           // 70
-    LOAD_BUILD_CLASS,     // 71
-    YIELD_FROM,           // 72
-    GET_AWAITABLE,        // 73
-    LOAD_ASSERTION_ERROR, // 74
-    INPLACE_LSHIFT,       // 75
-    INPLACE_RSHIFT,       // 76
-    INPLACE_AND,          // 77
-    INPLACE_XOR,          // 78
-    INPLACE_OR,           // 79
-    _80,
-    _81,
-    LIST_TO_TUPLE,     // 82
-    RETURN_VALUE,      // 83
-    IMPORT_STAR,       // 84
-    SETUP_ANNOTATIONS, // 85
-    YIELD_VALUE,       // 86
-    POP_BLOCK,         // 87
-    _88,
-    POP_EXCEPT, // 89
+enum PyOpCode {
+	POP_TOP = 1,
+	ROT_TWO = 2,
+	ROT_THREE = 3,
+	DUP_TOP = 4,
+	DUP_TOP_TWO = 5,
+	ROT_FOUR = 6,
+	NOP = 9,
+	UNARY_POSITIVE = 10,
+	UNARY_NEGATIVE = 11,
+	UNARY_NOT = 12,
+	UNARY_INVERT = 15,
+	BINARY_MATRIX_MULTIPLY = 16,
+	INPLACE_MATRIX_MULTIPLY = 17,
+	BINARY_POWER = 19,
+	BINARY_MULTIPLY = 20,
+	BINARY_MODULO = 22,
+	BINARY_ADD = 23,
+	BINARY_SUBTRACT = 24,
+	BINARY_SUBSCR = 25,
+	BINARY_FLOOR_DIVIDE = 26,
+	BINARY_TRUE_DIVIDE = 27,
+	INPLACE_FLOOR_DIVIDE = 28,
+	INPLACE_TRUE_DIVIDE = 29,
+	RERAISE = 48,
+	WITH_EXCEPT_START = 49,
+	GET_AITER = 50,
+	GET_ANEXT = 51,
+	BEFORE_ASYNC_WITH = 52,
+	END_ASYNC_FOR = 54,
+	INPLACE_ADD = 55,
+	INPLACE_SUBTRACT = 56,
+	INPLACE_MULTIPLY = 57,
+	INPLACE_MODULO = 59,
+	STORE_SUBSCR = 60,
+	DELETE_SUBSCR = 61,
+	BINARY_LSHIFT = 62,
+	BINARY_RSHIFT = 63,
+	BINARY_AND = 64,
+	BINARY_XOR = 65,
+	BINARY_OR = 66,
+	INPLACE_POWER = 67,
+	GET_ITER = 68,
+	GET_YIELD_FROM_ITER = 69,
+	PRINT_EXPR = 70,
+	LOAD_BUILD_CLASS = 71,
+	YIELD_FROM = 72,
+	GET_AWAITABLE = 73,
+	LOAD_ASSERTION_ERROR = 74,
+	INPLACE_LSHIFT = 75,
+	INPLACE_RSHIFT = 76,
+	INPLACE_AND = 77,
+	INPLACE_XOR = 78,
+	INPLACE_OR = 79,
+	LIST_TO_TUPLE = 82,
+	RETURN_VALUE = 83,
+	IMPORT_STAR = 84,
+	SETUP_ANNOTATIONS = 85,
+	YIELD_VALUE = 86,
+	POP_BLOCK = 87,
+	POP_EXCEPT = 89,
+	STORE_NAME = 90,
+	DELETE_NAME = 91,
+	UNPACK_SEQUENCE = 92,
+	FOR_ITER = 93,
+	UNPACK_EX = 94,
+	STORE_ATTR = 95,
+	DELETE_ATTR = 96,
+	STORE_GLOBAL = 97,
+	DELETE_GLOBAL = 98,
+	LOAD_CONST = 100,
+	LOAD_NAME = 101,
+	BUILD_TUPLE = 102,
+	BUILD_LIST = 103,
+	BUILD_SET = 104,
+	BUILD_MAP = 105,
+	LOAD_ATTR = 106,
+	COMPARE_OP = 107,
+	IMPORT_NAME = 108,
+	IMPORT_FROM = 109,
+	JUMP_FORWARD = 110,
+	JUMP_IF_FALSE_OR_POP = 111,
+	JUMP_IF_TRUE_OR_POP = 112,
+	JUMP_ABSOLUTE = 113,
+	POP_JUMP_IF_FALSE = 114,
+	POP_JUMP_IF_TRUE = 115,
+	LOAD_GLOBAL = 116,
+	IS_OP = 117,
+	CONTAINS_OP = 118,
+	JUMP_IF_NOT_EXC_MATCH = 121,
+	SETUP_FINALLY = 122,
+	LOAD_FAST = 124,
+	STORE_FAST = 125,
+	DELETE_FAST = 126,
+	RAISE_VARARGS = 130,
+	CALL_FUNCTION = 131,
+	MAKE_FUNCTION = 132,
+	BUILD_SLICE = 133,
+	LOAD_CLOSURE = 135,
+	LOAD_DEREF = 136,
+	STORE_DEREF = 137,
+	DELETE_DEREF = 138,
+	CALL_FUNCTION_KW = 141,
+	CALL_FUNCTION_EX = 142,
+	SETUP_WITH = 143,
+	EXTENDED_ARG = 144,
+	LIST_APPEND = 145,
+	SET_ADD = 146,
+	MAP_ADD = 147,
+	LOAD_CLASSDEREF = 148,
+	SETUP_ASYNC_WITH = 154,
+	FORMAT_VALUE = 155,
+	BUILD_CONST_KEY_MAP = 156,
+	BUILD_STRING = 157,
+	LOAD_METHOD = 160,
+	CALL_METHOD = 161,
+	LIST_EXTEND = 162,
+	SET_UPDATE = 163,
+	DICT_MERGE = 164,
+	DICT_UPDATE = 165,
+}
+
+enum CmpOp {
+    Lt, // <
+    Le, // <=
+    Eq, // ==
+    Ne, // !=
+    Gt, // >
+    Ge, // >=
+}
+
+enum RaiseForm {
+    ReRaise,
+    Raise,
+    RaiseFrom,
+}
+
+bitfield! {
+    pub struct MakeFunctionFlags(u8);
+    impl Debug;
+    pub has_positional_defaults, _: 0;
+    pub has_kwonly_defaults, _: 1;
+    pub has_annotations, _: 2;
+    pub has_freevars, _: 3;
+}
+
+bitfield! {
+    pub struct CallFunctionExFlags(u8);
+    impl Debug;
+    pub has_kwargs, _: 0;
+}
+
+
+/// The order is arbitrary and may change at any time
+#[allow(non_camel_case_types)]
+enum PyInstruction<'a> {
+	POP_TOP,
+	ROT_TWO,
+	ROT_THREE,
+	DUP_TOP,
+	DUP_TOP_TWO,
+	ROT_FOUR,
+	NOP,
+	UNARY_POSITIVE,
+	UNARY_NEGATIVE,
+	UNARY_NOT,
+	UNARY_INVERT,
+	BINARY_MATRIX_MULTIPLY,
+	INPLACE_MATRIX_MULTIPLY,
+	BINARY_POWER,
+	BINARY_MULTIPLY,
+	BINARY_MODULO,
+	BINARY_ADD,
+	BINARY_SUBTRACT,
+	BINARY_SUBSCR,
+	BINARY_FLOOR_DIVIDE,
+	BINARY_TRUE_DIVIDE,
+	INPLACE_FLOOR_DIVIDE,
+	INPLACE_TRUE_DIVIDE,
+	RERAISE,
+	WITH_EXCEPT_START,
+	GET_AITER,
+	GET_ANEXT,
+	BEFORE_ASYNC_WITH,
+	END_ASYNC_FOR,
+	INPLACE_ADD,
+	INPLACE_SUBTRACT,
+	INPLACE_MULTIPLY,
+	INPLACE_MODULO,
+	STORE_SUBSCR,
+	DELETE_SUBSCR,
+	BINARY_LSHIFT,
+	BINARY_RSHIFT,
+	BINARY_AND,
+	BINARY_XOR,
+	BINARY_OR,
+	INPLACE_POWER,
+	GET_ITER,
+	GET_YIELD_FROM_ITER,
+	PRINT_EXPR,
+	LOAD_BUILD_CLASS,
+	YIELD_FROM,
+	GET_AWAITABLE,
+	LOAD_ASSERTION_ERROR,
+	INPLACE_LSHIFT,
+	INPLACE_RSHIFT,
+	INPLACE_AND,
+	INPLACE_XOR,
+	INPLACE_OR,
+	LIST_TO_TUPLE,
+	RETURN_VALUE,
+	IMPORT_STAR,
+	SETUP_ANNOTATIONS,
+	YIELD_VALUE,
+	POP_BLOCK,
+	POP_EXCEPT,
+	STORE_NAME(&'a str),
+	DELETE_NAME(&'a str),
+	UNPACK_SEQUENCE(u32),
+	FOR_ITER(u32), /// delta
+	UNPACK_EX(u8, u8), /// counts
+	STORE_ATTR(&'a str),
+	DELETE_ATTR(&'a str),
+	STORE_GLOBAL(&'a str),
+	DELETE_GLOBAL(&'a str),
+	LOAD_CONST(&'a str), // XXX: Use repr?
+	LOAD_NAME(&'a str),
+	BUILD_TUPLE(u32), /// count
+	BUILD_LIST(u32), /// count
+	BUILD_SET(u32), /// count
+	BUILD_MAP(u32), /// count
+	LOAD_ATTR(&'a str),
+	COMPARE_OP(CmpOp),
+	IMPORT_NAME(&'a str),
+	IMPORT_FROM(&'a str),
+	JUMP_FORWARD(u32), /// delta
+	JUMP_IF_FALSE_OR_POP(u32), /// target
+	JUMP_IF_TRUE_OR_POP(u32), /// target
+	JUMP_ABSOLUTE(u32), /// target
+	POP_JUMP_IF_FALSE(u32), /// target
+	POP_JUMP_IF_TRUE(u32), /// target
+	LOAD_GLOBAL(&'a str),
+	IS_OP(bool),
+	CONTAINS_OP(bool),
+	JUMP_IF_NOT_EXC_MATCH(u32), /// target
+	SETUP_FINALLY(u32), /// delta
+	LOAD_FAST(&'a str),
+	STORE_FAST(&'a str),
+	DELETE_FAST(&'a str),
+	RAISE_VARARGS(RaiseForm),
+	CALL_FUNCTION(u32),
+	MAKE_FUNCTION(MakeFunctionFlags),
+	BUILD_SLICE(u8),
+	LOAD_CLOSURE(u32),
+	LOAD_DEREF(u32), /// slot (cell & free)
+	STORE_DEREF(u32), /// slot (cell & free)
+	DELETE_DEREF(u32), /// slot (cell & free)
+	CALL_FUNCTION_KW(u32), /// argc
+	CALL_FUNCTION_EX(CallFunctionExFlags),
+	SETUP_WITH(u32), /// delta
+	LIST_APPEND,
+	SET_ADD,
+	MAP_ADD,
+	LOAD_CLASSDEREF(u32), /// slot (cell & free), check locals first
+	SETUP_ASYNC_WITH,
+	FORMAT_VALUE,
+	BUILD_CONST_KEY_MAP(u32),
+	BUILD_STRING(u32),
+	LOAD_METHOD,
+	CALL_METHOD,
+	LIST_EXTEND(u32),
+	SET_UPDATE(u32),
+	DICT_MERGE(u32),
+	DICT_UPDATE(u32),
+    
+    BUILD_TUPLE_UNPACK(u32),
+    BUILD_TUPLE_UNPACK_WITH_CALL(u32),
+    BUILD_LIST_UNPACK(u32),
+    BUILD_SET_UNPACK(u32),
+    BUILD_MAP_UNPACK(u32),
+    BUILD_MAP_UNPACK_WITH_CALL(u32),
+}
+
+struct MyPyCodeObject<'a> {
+    argcount: i32,
+    posonlyargcount: i32,
+    kwonlyargcount: i32,
+    nlocals: i32,
+    stacksize: i32,
+    flags: i32,
+    firstlineno: i32,
+    code: &'a [u8],
+    consts: &'a [ffi::PyObject],
+    names: &'a [&'a str],
+    varnames: &'a [&'a str],
+    freevars: &'a [&'a str],
+    cellvars: &'a [&'a str],
+    filename: &'a str,
+    name: &'a str,
+    lnotab: &'a [u8],
 }
 
 #[cfg(test)]
