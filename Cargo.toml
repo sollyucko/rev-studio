@@ -1,44 +1,16 @@
 [package]
 name = "rev-studio"
 version = "0.1.0"
-authors = ["Solly <solly.ucko@gmail.com>"]
+authors = ["Solomon Ucko <solly.ucko@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-eclectic = "0.11"
-
-[dependencies.rev-studio-interface]
-path = 'rev-studio-interface'
-
-[dependencies.rev-studio-python]
-path = 'langs/rev-studio-python'
-[dependencies.rev-studio-rust]
-path = 'langs/rev-studio-rust'
-[dependencies.rev-studio-c]
-path = 'langs/rev-studio-c'
-[dependencies.rev-studio-d]
-path = 'langs/rev-studio-d'
-[dependencies.rev-studio-haskell]
-path = 'langs/rev-studio-haskell'
-[dependencies.rev-studio-dotnet]
-path = 'langs/rev-studio-dotnet'
-[dependencies.rev-studio-jvm]
-path = 'langs/rev-studio-jvm'
-[dependencies.rev-studio-asp-dotnet]
-path = 'langs/rev-studio-asp-dotnet'
-[dependencies.rev-studio-c-sharp]
-path = 'langs/rev-studio-c-sharp'
-[dependencies.rev-studio-f-sharp]
-path = 'langs/rev-studio-f-sharp'
-[dependencies.rev-studio-vb-dotnet]
-path = 'langs/rev-studio-vb-dotnet'
-[dependencies.rev-studio-kotlin]
-path = 'langs/rev-studio-kotlin'
-[dependencies.rev-studio-java]
-path = 'langs/rev-studio-java'
-[dependencies.rev-studio-scala]
-path = 'langs/rev-studio-scala'
-[dependencies.rev-studio-groovy]
-path = 'langs/rev-studio-groovy'
+rev-studio-arch-x86_64 = { path = 'modules/arch-x86_64' }
+rev-studio-arch-pvm = { path = 'modules/arch-pvm' }
+rev-studio-fmt-elf = { path = 'modules/fmt-elf' }
+rev-studio-fmt-pyc = { path = 'modules/fmt-pyc' }
+rev-studio-gui-curses = { path = 'modules/gui-curses' }
+rev-studio-lang-rust = { path = 'modules/lang-rust' }
+rev-studio-lang-python = { path = 'modules/lang-python' }
