@@ -1,0 +1,10 @@
+[package]
+name = "rev-studio-arch-pvm"
+version = "0.1.0"
+authors = ["Solomon Ucko <solly.ucko@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitfield = "0.13"
