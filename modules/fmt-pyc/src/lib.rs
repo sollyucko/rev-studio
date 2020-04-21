@@ -259,7 +259,7 @@ pub struct CodeObject {
     pub flags: CodeFlags,
     pub firstlineno: u32,
     pub code: Vec<u8>,
-    pub consts: Vec<PyObject>,
+    pub consts: Vec<Rc<PyObject>>,
     pub names: Vec<String>,
     pub varnames: Vec<String>,
     pub freevars: Vec<String>,
@@ -283,7 +283,7 @@ unsafe fn code_object_from_ffi_py_code_object_ptr(
         flags: CodeFlags::from_bits_truncate((*raw_code_ptr).co_flags as u32),
         firstlineno: (*raw_code_ptr).co_firstlineno as u32,
         code: vec_u8_from_ffi_pybytes_ptr((*raw_code_ptr).co_code),
-        consts: vec_pyobject_from_ffi_pytuple_ptr((*raw_code_ptr).co_consts),
+        consts: vec_rc_pyobject_from_ffi_pytuple_ptr((*raw_code_ptr).co_consts),
         names: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_names)?,
         varnames: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_varnames)?,
         freevars: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_freevars)?,
@@ -318,12 +318,14 @@ unsafe fn vec_ffi_pyobject_ptr_from_ffi_pytuple_ptr(
     slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr(obj).to_vec()
 }
 
-unsafe fn vec_pyobject_from_ffi_pytuple_ptr(obj: *mut ffi::PyObject) -> Vec<PyObject> {
+unsafe fn vec_rc_pyobject_from_ffi_pytuple_ptr(obj: *mut ffi::PyObject) -> Vec<Rc<PyObject>> {
     slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr(obj)
         .iter()
         .map(|o: &*mut ffi::PyObject| {
             ffi::Py_INCREF(*o); // pyo3::PyObject is an owned reference that decrefs after drop
-            transmute::<*mut ffi::PyObject, PyObject>(*o) // PyObject isn't Copy, so we can't pointer-cast
+            Rc::new(
+                transmute::<*mut ffi::PyObject, PyObject>(*o) // pyo3::PyObject isn't Copy, so we can't pointer-cast
+            )
         })
         .collect::<Vec<_>>()
 }

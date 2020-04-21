@@ -1,14 +1,22 @@
 use bitflags::bitflags;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::FromPrimitive;
+use pyo3::PyObject;
 use rev_studio_fmt_pyc::CodeObject;
 use std::rc::Rc;
 
-pub fn parse_code_obj(code_obj: Rc<CodeObject>) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
-    instructions_from_op_codes(parse_extended_arg(op_codes_from_bytes(Rc::clone(&code_obj).iter_code_rc())), code_obj)
+pub fn parse_code_obj(
+    code_obj: Rc<CodeObject>,
+) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
+    instructions_from_op_codes(
+        parse_extended_arg(op_codes_from_bytes(Rc::clone(&code_obj).iter_code_rc())),
+        code_obj,
+    )
 }
 
-pub fn try_parse_code_obj(code_obj: Rc<CodeObject>) -> Result<Vec<Instruction>, (Result<OpCode, u8>, u32)> {
+pub fn try_parse_code_obj(
+    code_obj: Rc<CodeObject>,
+) -> Result<Vec<Instruction>, (Result<OpCode, u8>, u32)> {
     parse_code_obj(code_obj).collect()
 }
 
@@ -164,10 +172,16 @@ pub enum OpCode {
     SET_ADD = 146,
     MAP_ADD = 147,
     LOAD_CLASSDEREF = 148,
+	BUILD_LIST_UNPACK = 149,
+	BUILD_MAP_UNPACK = 150,
+	BUILD_MAP_UNPACK_WITH_CALL = 151,
+	BUILD_TUPLE_UNPACK = 152,
+	BUILD_SET_UNPACK = 153,
     SETUP_ASYNC_WITH = 154,
     FORMAT_VALUE = 155,
     BUILD_CONST_KEY_MAP = 156,
     BUILD_STRING = 157,
+    BUILD_TUPLE_UNPACK_WITH_CALL = 158,
     LOAD_METHOD = 160,
     CALL_METHOD = 161,
     LIST_EXTEND = 162,
@@ -176,7 +190,7 @@ pub enum OpCode {
     DICT_UPDATE = 165,
 }
 
-#[derive(PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
 pub enum CmpOp {
     Lt = 0, // <
     Le = 1, // <=
@@ -192,14 +206,14 @@ pub enum CmpOp {
     Bad = 11,
 }
 
-#[derive(PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
 pub enum RaiseForm {
     ReRaise = 0,
     Raise = 1,
     RaiseFrom = 2,
 }
 
-#[derive(PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
 pub enum BuildSliceArgc {
     StartStop = 2,
     StartStopStep = 3,
@@ -315,7 +329,7 @@ fn instructions_from_op_codes(
                 code_obj.names[data as usize].clone(),
             )),
             Ok(OpCode::LOAD_CONST) => Some(Instruction::LOAD_CONST(
-                code_obj.names[data as usize].clone(),
+                code_obj.consts[data as usize].clone(), // Rc::clone
             )),
             Ok(OpCode::LOAD_NAME) => Some(Instruction::LOAD_NAME(
                 code_obj.names[data as usize].clone(),
@@ -395,9 +409,9 @@ fn instructions_from_op_codes(
     })
 }
 
-/// The order is arbitrary and may change at any time
+/// Same *relative ordering* as OpCode
 #[allow(non_camel_case_types)]
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     POP_TOP,
     ROT_TWO,
@@ -463,15 +477,12 @@ pub enum Instruction {
     DELETE_NAME(String),
     UNPACK_SEQUENCE(u32),
     FOR_ITER(u32),
-    UNPACK_EX {
-        before: u8,
-        after: u8,
-    },
+    UNPACK_EX { before: u8, after: u8 },
     STORE_ATTR(String),
     DELETE_ATTR(String),
     STORE_GLOBAL(String),
     DELETE_GLOBAL(String),
-    LOAD_CONST(String), // XXX: Use repr?
+    LOAD_CONST(Rc<PyObject>), // XXX: Use repr?
     LOAD_NAME(String),
     BUILD_TUPLE(u32),
     BUILD_LIST(u32),
@@ -510,21 +521,20 @@ pub enum Instruction {
     SET_ADD,
     MAP_ADD,
     LOAD_CLASSDEREF(u32),
+    BUILD_LIST_UNPACK(u32),
+    BUILD_MAP_UNPACK(u32),
+    BUILD_MAP_UNPACK_WITH_CALL(u32),
+    BUILD_TUPLE_UNPACK(u32),
+    BUILD_SET_UNPACK(u32),
     SETUP_ASYNC_WITH,
     FORMAT_VALUE,
     BUILD_CONST_KEY_MAP(u32),
     BUILD_STRING(u32),
+    BUILD_TUPLE_UNPACK_WITH_CALL(u32),
     LOAD_METHOD,
     CALL_METHOD,
     LIST_EXTEND(u32),
     SET_UPDATE(u32),
     DICT_MERGE(u32),
     DICT_UPDATE(u32),
-
-    BUILD_TUPLE_UNPACK(u32),
-    BUILD_TUPLE_UNPACK_WITH_CALL(u32),
-    BUILD_LIST_UNPACK(u32),
-    BUILD_SET_UNPACK(u32),
-    BUILD_MAP_UNPACK(u32),
-    BUILD_MAP_UNPACK_WITH_CALL(u32),
 }
