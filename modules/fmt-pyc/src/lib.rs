@@ -17,6 +17,7 @@ use pyo3::{ffi, types, PyDowncastError, PyErr, PyObject, PyResult, Python};
 use std::io::{self, BufRead, Seek, SeekFrom};
 use std::mem::transmute;
 use std::os::raw::c_char;
+use std::rc::Rc;
 use std::slice;
 use std::time::{Duration, SystemTime};
 
@@ -340,6 +341,32 @@ unsafe fn vec_string_from_ffi_pytuple_pystring(obj: *mut ffi::PyObject) -> PyRes
         .iter()
         .map(|o: &*mut ffi::PyObject| string_from_ffi_string(*o))
         .collect::<Result<Vec<_>, _>>()
+}
+
+impl CodeObject {
+    pub fn iter_code_rc(self: Rc<Self>) -> impl Iterator<Item = u8> + Clone {
+        IterCodeRc { code_obj: self, i: 0 }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct IterCodeRc {
+    code_obj: Rc<CodeObject>,
+    i: usize,
+}
+
+impl Iterator for IterCodeRc {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<u8> {
+        if self.i >= self.code_obj.code.len() {
+            None
+        } else {
+            let result = self.code_obj.code[self.i];
+            self.i += 1;
+            Some(result)
+        }
+    }
 }
 
 #[cfg(test)]

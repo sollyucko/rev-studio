@@ -4,7 +4,15 @@ use num_traits::FromPrimitive;
 use rev_studio_fmt_pyc::CodeObject;
 use std::rc::Rc;
 
-pub fn op_codes_from_bytes(
+pub fn parse_code_obj(code_obj: Rc<CodeObject>) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
+    instructions_from_op_codes(parse_extended_arg(op_codes_from_bytes(Rc::clone(&code_obj).iter_code_rc())), code_obj)
+}
+
+pub fn try_parse_code_obj(code_obj: Rc<CodeObject>) -> Result<Vec<Instruction>, (Result<OpCode, u8>, u32)> {
+    parse_code_obj(code_obj).collect()
+}
+
+fn op_codes_from_bytes(
     code: impl Iterator<Item = u8> + Clone,
 ) -> impl Iterator<Item = (Result<OpCode, u8>, u8)> {
     let mut code2 = code.clone();
@@ -37,7 +45,7 @@ impl<CodeIter: Iterator<Item = (Result<OpCode, u8>, u8)>> Iterator
     }
 }
 
-pub fn parse_extended_arg(
+fn parse_extended_arg(
     op_codes: impl Iterator<Item = (Result<OpCode, u8>, u8)>,
 ) -> impl Iterator<Item = (Result<OpCode, u8>, u32)> {
     ParseExtendedArgIter { op_codes }
@@ -216,7 +224,7 @@ bitflags! {
 
 // TODO: may depend on version
 #[allow(clippy::too_many_lines)]
-pub fn instructions_from_op_codes(
+fn instructions_from_op_codes(
     op_codes: impl Iterator<Item = (Result<OpCode, u8>, u32)>,
     code_obj: Rc<CodeObject>,
 ) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
@@ -455,12 +463,10 @@ pub enum Instruction {
     DELETE_NAME(String),
     UNPACK_SEQUENCE(u32),
     FOR_ITER(u32),
-    /// delta
     UNPACK_EX {
         before: u8,
         after: u8,
     },
-    /// counts
     STORE_ATTR(String),
     DELETE_ATTR(String),
     STORE_GLOBAL(String),
@@ -468,36 +474,24 @@ pub enum Instruction {
     LOAD_CONST(String), // XXX: Use repr?
     LOAD_NAME(String),
     BUILD_TUPLE(u32),
-    /// count
     BUILD_LIST(u32),
-    /// count
     BUILD_SET(u32),
-    /// count
     BUILD_MAP(u32),
-    /// count
     LOAD_ATTR(String),
     COMPARE_OP(CmpOp),
     IMPORT_NAME(String),
     IMPORT_FROM(String),
     JUMP_FORWARD(u32),
-    /// delta
     JUMP_IF_FALSE_OR_POP(u32),
-    /// target
     JUMP_IF_TRUE_OR_POP(u32),
-    /// target
     JUMP_ABSOLUTE(u32),
-    /// target
     POP_JUMP_IF_FALSE(u32),
-    /// target
     POP_JUMP_IF_TRUE(u32),
-    /// target
     LOAD_GLOBAL(String),
     IS_OP(bool),
     CONTAINS_OP(bool),
     JUMP_IF_NOT_EXC_MATCH(u32),
-    /// target
     SETUP_FINALLY(u32),
-    /// delta
     LOAD_FAST(String),
     STORE_FAST(String),
     DELETE_FAST(String),
@@ -507,21 +501,15 @@ pub enum Instruction {
     BUILD_SLICE(BuildSliceArgc),
     LOAD_CLOSURE(u32),
     LOAD_DEREF(u32),
-    /// slot (cell & free)
     STORE_DEREF(u32),
-    /// slot (cell & free)
     DELETE_DEREF(u32),
-    /// slot (cell & free)
     CALL_FUNCTION_KW(u32),
-    /// argc
     CALL_FUNCTION_EX(CallFunctionExFlags),
     SETUP_WITH(u32),
-    /// delta
     LIST_APPEND,
     SET_ADD,
     MAP_ADD,
     LOAD_CLASSDEREF(u32),
-    /// slot (cell & free), check locals first
     SETUP_ASYNC_WITH,
     FORMAT_VALUE,
     BUILD_CONST_KEY_MAP(u32),
