@@ -1,5 +1,5 @@
 [package]
-name = "rev-studio-fmt-pyc"
+name = "rev-studio-utils"
 version = "0.1.0"
 authors = ["Solomon Ucko <solly.ucko@gmail.com>"]
 edition = "2018"
@@ -7,6 +7,3 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rev-studio-utils = { path = '../utils' }
-pyo3 = "0.9"
-bitflags = "1.2"

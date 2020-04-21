@@ -11,7 +11,7 @@
 
 #![allow(dead_code)]
 
-use bitfield::bitfield;
+use bitflags::bitflags;
 use pyo3::{ffi, types, PyDowncastError, PyErr, PyObject, PyResult, Python};
 
 use std::io::{self, BufRead, Seek, SeekFrom};
@@ -20,20 +20,7 @@ use std::os::raw::c_char;
 use std::slice;
 use std::time::{Duration, SystemTime};
 
-macro_rules! union {
-    ($vis:vis $name:ident $([$attr:meta])* $($variant:ident($type:ty),)+) => {
-        $(#[$attr])*
-        $vis enum $name {
-            $($variant($type),)+
-        }
-
-        $(impl From<$type> for $name {
-            fn from(orig: $type) -> $name {
-                $name::$variant(orig)
-            }
-        })+
-    }
-}
+use rev_studio_utils::union;
 
 #[derive(Debug)]
 pub enum PycParseError {
@@ -51,11 +38,11 @@ union! { pub PycError [derive(Debug)]
 
 type PycResult<T> = Result<T, PycError>;
 
-bitfield! {
-    pub struct Flags(u32);
-    impl Debug;
-    pub is_hash_based, _: 0;
-    pub is_check_source, _: 1;
+bitflags! {
+    pub struct Flags: u32 {
+        const HASH_BASED   = 0b0000_0001;
+        const CHECK_SOURCE = 0b0000_0010;
+    }
 }
 
 // TODO (eventually): different for different Python versions -> enum?
@@ -69,8 +56,8 @@ pub struct PycMetadata {
 
 #[derive(Debug)]
 pub struct Pyc {
-    metadata: PycMetadata,
-    code: CodeObject,
+    pub metadata: PycMetadata,
+    pub code: CodeObject,
 }
 
 impl Pyc {
@@ -94,10 +81,7 @@ impl Pyc {
 
         f.read_exact(&mut buf)?;
         let flags_u32 = u32::from_le_bytes(buf);
-        if flags_u32 & !0b11_u32 != 0 {
-            return Err(PycParseError::UnrecognizedFlag(flags_u32).into());
-        };
-        let flags = Flags(flags_u32);
+        let flags = Flags::from_bits(flags_u32).ok_or_else(|| PycParseError::UnrecognizedFlag(flags_u32))?;
 
         f.read_exact(&mut buf)?;
         let mtime =
@@ -238,50 +222,51 @@ impl Pyc {
     }
 }
 
-bitfield! {
-    pub struct CodeFlags(u32);
-    impl Debug;
-    pub is_optimized, _: 0;
-    pub is_newlocals, _: 1;
-    pub is_varargs, _: 2;
-    pub is_varkeywords, _: 3;
-    pub is_nested, _: 4;
-    pub is_generator, _: 5;
-    pub is_nofree, _: 6;
-    pub is_coroutine, _: 7;
-    pub is_iterable_coroutine, _: 8;
-    pub is_async_generator, _: 9;
-    // TODO: old versions
-    pub is_generator_allowed, _: 12;
-    pub is_future_division, _: 13;
-    pub is_future_absolute_import, _: 14;
-    pub is_future_with_statement, _: 15;
-    pub is_future_print_function, _: 16;
-    pub is_future_unicode_literals, _: 17;
-    pub is_future_barry_as_bdfl, _: 18;
-    pub is_future_generator_stop, _: 19;
-    pub is_future_annotations, _: 20;
+bitflags! {
+    pub struct CodeFlags: u32 {
+		const OPTIMIZED                   = 0x1;
+		const NEWLOCALS                   = 0x2;
+		const VARARGS                     = 0x4;
+		const VARKEYWORDS                 = 0x8;
+		const NESTED                     = 0x10;
+		const GENERATOR                  = 0x20;
+		const NOFREE                     = 0x40;
+		const COROUTINE                  = 0x80;
+		const ITERABLE_COROUTINE        = 0x100;
+		const ASYNC_GENERATOR           = 0x200;
+        // TODO: old versions
+        const GENERATOR_ALLOWED        = 0x1000;
+        const FUTURE_DIVISION          = 0x2000;
+        const FUTURE_ABSOLUTE_IMPORT   = 0x4000;
+        const FUTURE_WITH_STATEMENT    = 0x8000;
+        const FUTURE_PRINT_FUNCTION   = 0x10000;
+        const FUTURE_UNICODE_LITERALS = 0x20000;
+        const FUTURE_BARRY_AS_BDFL    = 0x40000;
+        const FUTURE_GENERATOR_STOP   = 0x80000;
+        #[allow(clippy::unreadable_literal)]
+        const FUTURE_ANNOTATIONS     = 0x100000;
+    }
 }
 
 #[derive(Debug)]
-struct CodeObject {
-    argcount: u32,
+pub struct CodeObject {
+    pub argcount: u32,
     //posonlyargcount: i32, // too new
-    kwonlyargcount: u32,
-    nlocals: u32,
-    stacksize: u32,
-    flags: CodeFlags,
-    firstlineno: u32,
-    code: Vec<u8>,
-    consts: Vec<PyObject>,
-    names: Vec<String>,
-    varnames: Vec<String>,
-    freevars: Vec<String>,
-    cellvars: Vec<String>,
+    pub kwonlyargcount: u32,
+    pub nlocals: u32,
+    pub stacksize: u32,
+    pub flags: CodeFlags,
+    pub firstlineno: u32,
+    pub code: Vec<u8>,
+    pub consts: Vec<PyObject>,
+    pub names: Vec<String>,
+    pub varnames: Vec<String>,
+    pub freevars: Vec<String>,
+    pub cellvars: Vec<String>,
     //cell2arg: Vec<u8>, // not marshalled
-    filename: String,
-    name: String,
-    lnotab: Vec<u8>,
+    pub filename: String,
+    pub name: String,
+    pub lnotab: Vec<u8>,
 }
 
 #[allow(clippy::cast_sign_loss)]
@@ -294,7 +279,7 @@ unsafe fn code_object_from_ffi_py_code_object_ptr(
         kwonlyargcount: (*raw_code_ptr).co_kwonlyargcount as u32,
         nlocals: (*raw_code_ptr).co_nlocals as u32,
         stacksize: (*raw_code_ptr).co_stacksize as u32,
-        flags: CodeFlags((*raw_code_ptr).co_flags as u32),
+        flags: CodeFlags::from_bits_truncate((*raw_code_ptr).co_flags as u32),
         firstlineno: (*raw_code_ptr).co_firstlineno as u32,
         code: vec_u8_from_ffi_pybytes_ptr((*raw_code_ptr).co_code),
         consts: vec_pyobject_from_ffi_pytuple_ptr((*raw_code_ptr).co_consts),
