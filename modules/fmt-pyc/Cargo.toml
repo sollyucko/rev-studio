@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 rev-studio-utils = { path = '../utils' }
-pyo3 = "0.9"
+py-marshal = "0.3"
 bitflags = "1.2"
+error-chain = "0.12"

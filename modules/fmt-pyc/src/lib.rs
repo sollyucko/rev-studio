@@ -12,32 +12,41 @@
 #![allow(dead_code)]
 
 use bitflags::bitflags;
-use pyo3::{ffi, types, PyDowncastError, PyErr, PyObject, PyResult, Python};
 
-use std::io::{self, BufRead, Seek, SeekFrom};
-use std::mem::transmute;
-use std::os::raw::c_char;
-use std::rc::Rc;
-use std::slice;
+use std::io::Read;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use rev_studio_utils::union;
+use py_marshal::{self, read::marshal_load, Code};
 
-#[derive(Debug)]
-pub enum PycParseError {
-    MagicNumberShouldEndIn0d0a([u8; 0x2]),
-    UnrecognizedPythonVersion([u8; 0x2]),
-    UnrecognizedFlag(u32),
+use self::errors::*;
+
+mod errors {
+    use error_chain::error_chain;
+
+    error_chain! {
+        types {
+            Error, ErrorKind, ResultExt, Result;
+        }
+
+        links {
+            MarshalRead(::py_marshal::read::errors::Error, ::py_marshal::read::errors::ErrorKind);
+        }
+
+        foreign_links {
+            Io(::std::io::Error);
+        }
+
+        errors {
+            MagicNumberShouldEndIn0d0a(end_of_magic: [u8; 0x2])
+            UnrecognizedPythonVersion(start_of_magic: [u8; 0x2])
+            UnrecognizedFlag(flag: u32)
+            Extract(obj: ::py_marshal::Obj)
+        }
+
+        skip_msg_variant
+    }
 }
-
-union! { pub PycError [derive(Debug)]
-    ParseError(PycParseError),
-    IoError(io::Error),
-    PyErr(PyErr),
-    PyDowncastError(PyDowncastError),
-}
-
-type PycResult<T> = Result<T, PycError>;
 
 bitflags! {
     pub struct Flags: u32 {
@@ -58,31 +67,30 @@ pub struct PycMetadata {
 #[derive(Debug)]
 pub struct Pyc {
     pub metadata: PycMetadata,
-    pub code: CodeObject,
+    pub code: Arc<Code>,
 }
 
 impl Pyc {
-    fn is_likely_valid<F: BufRead + Seek>(f: &mut F) -> PycResult<()> {
+    fn is_likely_valid<F: Read>(f: &mut F) -> Result<()> {
         Self::read_metadata(f)?;
         Ok(())
     }
 
-    fn read_metadata<F: BufRead + Seek>(f: &mut F) -> PycResult<PycMetadata> {
-        f.seek(SeekFrom::Start(0x0))?;
+    fn read_metadata<F: Read>(f: &mut F) -> Result<PycMetadata> {
         let mut buf = [0; 0x4];
 
         f.read_exact(&mut buf)?;
         let version = match buf {
             [a, b, 0x0d, 0x0a] => {
                 Self::detect_version_from_magic_number(u16::from(b) * 0x100_u16 + u16::from(a))
-                    .ok_or(PycParseError::UnrecognizedPythonVersion([a, b]))?
+                    .ok_or(ErrorKind::UnrecognizedPythonVersion([a, b]))?
             }
-            [_, _, c, d] => return Err(PycParseError::MagicNumberShouldEndIn0d0a([c, d]).into()),
+            [_, _, c, d] => return Err(ErrorKind::MagicNumberShouldEndIn0d0a([c, d]).into()),
         };
 
         f.read_exact(&mut buf)?;
         let flags_u32 = u32::from_le_bytes(buf);
-        let flags = Flags::from_bits(flags_u32).ok_or_else(|| PycParseError::UnrecognizedFlag(flags_u32))?;
+        let flags = Flags::from_bits(flags_u32).ok_or_else(|| ErrorKind::UnrecognizedFlag(flags_u32))?;
 
         f.read_exact(&mut buf)?;
         let mtime =
@@ -202,24 +210,10 @@ impl Pyc {
         }
     }
 
-    fn try_parse<F: BufRead + Seek>(f: &mut F) -> PycResult<Self> {
+    fn try_parse<F: Read>(f: &mut F) -> Result<Self> {
         let metadata = Self::read_metadata(f)?;
-        let mut code_buffer = Vec::new();
-        f.read_to_end(&mut code_buffer)?;
-        let _gil_guard = Python::acquire_gil();
-
-        // PyMarshal_ReadObjectFromString does not store the string pointer given to it after it
-        // returns; it uses memcpy as needed.
-        #[allow(clippy::cast_possible_wrap)]
-        let raw_code_ptr = unsafe {
-            ffi::PyMarshal_ReadObjectFromString(
-                code_buffer.as_ptr() as *const c_char,
-                code_buffer.len() as isize,
-            )
-        } as *mut ffi::PyCodeObject;
-
-        let code = unsafe { code_object_from_ffi_py_code_object_ptr(raw_code_ptr) }?;
-        Ok(Self { metadata, code })
+        let code = marshal_load(f)?.extract_code().map_err(ErrorKind::Extract)?;
+        Ok(Self { metadata, code: code })
     }
 }
 
@@ -249,135 +243,13 @@ bitflags! {
     }
 }
 
-#[derive(Debug)]
-pub struct CodeObject {
-    pub argcount: u32,
-    //posonlyargcount: i32, // too new
-    pub kwonlyargcount: u32,
-    pub nlocals: u32,
-    pub stacksize: u32,
-    pub flags: CodeFlags,
-    pub firstlineno: u32,
-    pub code: Vec<u8>,
-    pub consts: Vec<Rc<PyObject>>,
-    pub names: Vec<String>,
-    pub varnames: Vec<String>,
-    pub freevars: Vec<String>,
-    pub cellvars: Vec<String>,
-    //cell2arg: Vec<u8>, // not marshalled
-    pub filename: String,
-    pub name: String,
-    pub lnotab: Vec<u8>,
-}
-
-#[allow(clippy::cast_sign_loss)]
-unsafe fn code_object_from_ffi_py_code_object_ptr(
-    raw_code_ptr: *mut ffi::PyCodeObject,
-) -> PyResult<CodeObject> {
-    Ok(CodeObject {
-        argcount: (*raw_code_ptr).co_argcount as u32,
-        //posonlyargcount: (*raw_code_ptr).co_posonlyargcount,
-        kwonlyargcount: (*raw_code_ptr).co_kwonlyargcount as u32,
-        nlocals: (*raw_code_ptr).co_nlocals as u32,
-        stacksize: (*raw_code_ptr).co_stacksize as u32,
-        flags: CodeFlags::from_bits_truncate((*raw_code_ptr).co_flags as u32),
-        firstlineno: (*raw_code_ptr).co_firstlineno as u32,
-        code: vec_u8_from_ffi_pybytes_ptr((*raw_code_ptr).co_code),
-        consts: vec_rc_pyobject_from_ffi_pytuple_ptr((*raw_code_ptr).co_consts),
-        names: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_names)?,
-        varnames: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_varnames)?,
-        freevars: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_freevars)?,
-        cellvars: vec_string_from_ffi_pytuple_pystring((*raw_code_ptr).co_cellvars)?,
-        filename: string_from_ffi_string((*raw_code_ptr).co_filename)?,
-        name: string_from_ffi_string((*raw_code_ptr).co_name)?,
-        lnotab: vec_u8_from_ffi_pybytes_ptr((*raw_code_ptr).co_lnotab),
-    })
-}
-
-#[allow(clippy::cast_sign_loss)]
-unsafe fn vec_u8_from_ffi_pybytes_ptr(obj: *mut ffi::PyObject) -> Vec<u8> {
-    let data = ffi::PyBytes_AsString(obj) as *mut u8;
-    let len = ffi::PyBytes_Size(obj) as usize;
-    let slice_ = slice::from_raw_parts_mut(data, len);
-    slice_.to_vec()
-}
-
-#[allow(clippy::cast_sign_loss)]
-unsafe fn slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr<'a>(
-    obj: *mut ffi::PyObject,
-) -> &'a [*mut ffi::PyObject] {
-    let data = &mut ((*(obj as *mut ffi::PyTupleObject)).ob_item) as *mut [*mut ffi::PyObject; 1]
-        as *mut *mut ffi::PyObject;
-    let len = ffi::PyTuple_Size(obj) as usize;
-    slice::from_raw_parts_mut(data, len)
-}
-
-unsafe fn vec_ffi_pyobject_ptr_from_ffi_pytuple_ptr(
-    obj: *mut ffi::PyObject,
-) -> Vec<*mut ffi::PyObject> {
-    slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr(obj).to_vec()
-}
-
-unsafe fn vec_rc_pyobject_from_ffi_pytuple_ptr(obj: *mut ffi::PyObject) -> Vec<Rc<PyObject>> {
-    slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr(obj)
-        .iter()
-        .map(|o: &*mut ffi::PyObject| {
-            ffi::Py_INCREF(*o); // pyo3::PyObject is an owned reference that decrefs after drop
-            Rc::new(
-                transmute::<*mut ffi::PyObject, PyObject>(*o) // pyo3::PyObject isn't Copy, so we can't pointer-cast
-            )
-        })
-        .collect::<Vec<_>>()
-}
-
-unsafe fn string_from_ffi_string(obj: *mut ffi::PyObject) -> PyResult<String> {
-    Ok(
-        (&*(&obj as *const *mut ffi::PyObject as *const types::PyString))
-            .to_string()?
-            .into_owned(),
-    )
-}
-
-unsafe fn vec_string_from_ffi_pytuple_pystring(obj: *mut ffi::PyObject) -> PyResult<Vec<String>> {
-    slice_ffi_pyobject_ptr_from_ffi_pytuple_ptr(obj)
-        .iter()
-        .map(|o: &*mut ffi::PyObject| string_from_ffi_string(*o))
-        .collect::<Result<Vec<_>, _>>()
-}
-
-impl CodeObject {
-    pub fn iter_code_rc(self: Rc<Self>) -> impl Iterator<Item = u8> + Clone {
-        IterCodeRc { code_obj: self, i: 0 }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct IterCodeRc {
-    code_obj: Rc<CodeObject>,
-    i: usize,
-}
-
-impl Iterator for IterCodeRc {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<u8> {
-        if self.i >= self.code_obj.code.len() {
-            None
-        } else {
-            let result = self.code_obj.code[self.i];
-            self.i += 1;
-            Some(result)
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{Cursor, Seek, SeekFrom};
 
     #[test]
-    fn test_parsing_pyc() -> PycResult<()> {
+    fn test_parsing_pyc() -> Result<()> {
         // xxd -i
         let mut test_file = Cursor::<&[u8]>::new(&[
             0x42, 0x0d, 0x0d, 0x0a, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x1a, 0x78, 0x5e, 0x00, 0x00,
@@ -394,7 +266,9 @@ mod test {
             0x6d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x3e, 0x01, 0x00, 0x00, 0x00, 0xf3, 0x00, 0x00,
             0x00, 0x00,
         ]);
-        println!("{:?}", Pyc::try_parse(&mut test_file)?);
+        println!("{:?}", test_file.seek(SeekFrom::Current(0)));
+        println!("{:?}", Pyc::try_parse(&mut test_file)/*?*/);
+        println!("{:?}", test_file.seek(SeekFrom::Current(0)));
         Ok(())
     }
 }
