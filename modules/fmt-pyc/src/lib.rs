@@ -17,7 +17,11 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use py_marshal::{self, read::marshal_load, Code};
+use py_marshal::{
+    self,
+    read::{marshal_load_ex, MarshalLoadExOptions},
+    Code,
+};
 
 use self::errors::*;
 
@@ -213,9 +217,14 @@ impl Pyc {
 
     fn try_parse<F: Read>(f: &mut F) -> Result<Self> {
         let metadata = Self::read_metadata(f)?;
-        let code = marshal_load(f)?
-            .extract_code()
-            .map_err(ErrorKind::Extract)?;
+        let code = marshal_load_ex(
+            f,
+            MarshalLoadExOptions {
+                has_posonlyargcount: false, // TODO: should depend on version
+            },
+        )?
+        .extract_code()
+        .map_err(ErrorKind::Extract)?;
         Ok(Self { metadata, code })
     }
 }
@@ -269,7 +278,7 @@ mod test {
             0x00, 0x00,
         ];
         println!("{:?}", test_file.len());
-        println!("{:?}", Pyc::try_parse(&mut test_file) /*?*/);
+        println!("{:?}", Pyc::try_parse(&mut test_file)?);
         println!("{:?}", test_file.len());
         Ok(())
     }
