@@ -1,3 +1,4 @@
+#![allow(clippy::wildcard_imports)]
 // Based on:
 //  https://nedbatchelder.com/blog/200804/the_structure_of_pyc_files.html
 //  https://github.com/python/cpython/blob/master/Lib/importlib/_bootstrap_external.py
@@ -8,7 +9,6 @@
 //  https://docs.python.org/X.X/library/dis.html
 // Other tools:
 //  https://regexr.com/
-
 #![allow(dead_code)]
 
 use bitflags::bitflags;
@@ -90,7 +90,8 @@ impl Pyc {
 
         f.read_exact(&mut buf)?;
         let flags_u32 = u32::from_le_bytes(buf);
-        let flags = Flags::from_bits(flags_u32).ok_or_else(|| ErrorKind::UnrecognizedFlag(flags_u32))?;
+        let flags =
+            Flags::from_bits(flags_u32).ok_or_else(|| ErrorKind::UnrecognizedFlag(flags_u32))?;
 
         f.read_exact(&mut buf)?;
         let mtime =
@@ -212,23 +213,25 @@ impl Pyc {
 
     fn try_parse<F: Read>(f: &mut F) -> Result<Self> {
         let metadata = Self::read_metadata(f)?;
-        let code = marshal_load(f)?.extract_code().map_err(ErrorKind::Extract)?;
-        Ok(Self { metadata, code: code })
+        let code = marshal_load(f)?
+            .extract_code()
+            .map_err(ErrorKind::Extract)?;
+        Ok(Self { metadata, code })
     }
 }
 
 bitflags! {
     pub struct CodeFlags: u32 {
-		const OPTIMIZED                   = 0x1;
-		const NEWLOCALS                   = 0x2;
-		const VARARGS                     = 0x4;
-		const VARKEYWORDS                 = 0x8;
-		const NESTED                     = 0x10;
-		const GENERATOR                  = 0x20;
-		const NOFREE                     = 0x40;
-		const COROUTINE                  = 0x80;
-		const ITERABLE_COROUTINE        = 0x100;
-		const ASYNC_GENERATOR           = 0x200;
+        const OPTIMIZED                   = 0x1;
+        const NEWLOCALS                   = 0x2;
+        const VARARGS                     = 0x4;
+        const VARKEYWORDS                 = 0x8;
+        const NESTED                     = 0x10;
+        const GENERATOR                  = 0x20;
+        const NOFREE                     = 0x40;
+        const COROUTINE                  = 0x80;
+        const ITERABLE_COROUTINE        = 0x100;
+        const ASYNC_GENERATOR           = 0x200;
         // TODO: old versions
         const GENERATOR_ALLOWED        = 0x1000;
         const FUTURE_DIVISION          = 0x2000;
@@ -245,8 +248,7 @@ bitflags! {
 
 #[cfg(test)]
 mod test {
-    use super::{Result, Pyc};
-    use std::io::{Cursor, Seek, SeekFrom};
+    use super::{Pyc, Result};
 
     #[test]
     fn test_parsing_pyc() -> Result<()> {
@@ -267,7 +269,7 @@ mod test {
             0x00, 0x00,
         ];
         println!("{:?}", test_file.len());
-        println!("{:?}", Pyc::try_parse(&mut test_file)/*?*/);
+        println!("{:?}", Pyc::try_parse(&mut test_file) /*?*/);
         println!("{:?}", test_file.len());
         Ok(())
     }
