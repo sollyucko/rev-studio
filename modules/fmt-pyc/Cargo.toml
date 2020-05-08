@@ -7,7 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rev-studio-utils = { path = '../utils' }
 py-marshal = "0.3"
 bitflags = "1.2"
 error-chain = "0.12"
