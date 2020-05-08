@@ -43,7 +43,7 @@ mod errors {
 
         errors {
             MagicNumberShouldEndIn0d0a(end_of_magic: [u8; 0x2])
-            UnrecognizedPythonVersion(start_of_magic: [u8; 0x2])
+            UnrecognizedPythonVersion(version_id: u16)
             UnrecognizedFlag(flag: u32)
             Extract(obj: ::py_marshal::Obj)
         }
@@ -62,7 +62,7 @@ bitflags! {
 // TODO (eventually): different for different Python versions -> enum?
 #[derive(Debug)]
 pub struct PycMetadata {
-    pub version: &'static str,
+    pub version_id: u16,
     pub flags: Flags,
     pub mtime: SystemTime,
     pub source_size: u32,
@@ -76,7 +76,7 @@ pub struct Pyc {
 
 impl Pyc {
     fn is_likely_valid<F: Read>(f: &mut F) -> Result<()> {
-        Self::read_metadata(f)?;
+        let _: PycMetadata = Self::read_metadata(f)?;
         Ok(())
     }
 
@@ -84,10 +84,12 @@ impl Pyc {
         let mut buf = [0; 0x4];
 
         f.read_exact(&mut buf)?;
-        let version = match buf {
+        let version_id = match buf {
             [a, b, 0x0d, 0x0a] => {
-                Self::detect_version_from_magic_number(u16::from(b) * 0x100_u16 + u16::from(a))
-                    .ok_or(ErrorKind::UnrecognizedPythonVersion([a, b]))?
+                let x = u16::from_le_bytes([a, b]);
+                let _: &'static str =
+                    Self::version_id_to_string(x).ok_or(ErrorKind::UnrecognizedPythonVersion(x))?;
+                x
             }
             [_, _, c, d] => return Err(ErrorKind::MagicNumberShouldEndIn0d0a([c, d]).into()),
         };
@@ -105,14 +107,15 @@ impl Pyc {
         let source_size = u32::from_le_bytes(buf);
 
         Ok(PycMetadata {
-            version,
+            version_id,
             flags,
             mtime,
             source_size,
         })
     }
 
-    fn detect_version_from_magic_number(magic_number: u16) -> Option<&'static str> {
+    #[must_use]
+    pub fn version_id_to_string(magic_number: u16) -> Option<&'static str> {
         #[allow(unreachable_patterns)]
         #[allow(clippy::match_same_arms)]
         #[allow(clippy::match_overlapping_arm)]
@@ -220,7 +223,7 @@ impl Pyc {
         let code = marshal_load_ex(
             f,
             MarshalLoadExOptions {
-                has_posonlyargcount: false, // TODO: should depend on version
+                has_posonlyargcount: metadata.version_id < 20121 && metadata.version_id >= 3411,
             },
         )?
         .extract_code()
