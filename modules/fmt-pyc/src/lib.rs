@@ -23,8 +23,9 @@ use py_marshal::{
     Code,
 };
 
-use self::errors::*;
+pub use self::errors::*;
 
+/// Contains [`Error`], [`ErrorKind`], [`Result`], and [`ResultExt`].
 pub mod errors {
     use error_chain::error_chain;
 
