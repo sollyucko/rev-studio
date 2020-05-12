@@ -25,7 +25,7 @@ use py_marshal::{
 
 use self::errors::*;
 
-mod errors {
+pub mod errors {
     use error_chain::error_chain;
 
     error_chain! {
@@ -53,6 +53,7 @@ mod errors {
 }
 
 bitflags! {
+    /// .pyc flags
     pub struct Flags: u32 {
         const HASH_BASED   = 0b0000_0001;
         const CHECK_SOURCE = 0b0000_0010;
@@ -60,6 +61,7 @@ bitflags! {
 }
 
 // TODO (eventually): different for different Python versions -> enum?
+/// .pyc metadata
 #[derive(Debug)]
 pub struct PycMetadata {
     pub version_id: u16,
@@ -68,6 +70,7 @@ pub struct PycMetadata {
     pub source_size: u32,
 }
 
+/// A parsed .pyc file
 #[derive(Debug)]
 pub struct Pyc {
     pub metadata: PycMetadata,
@@ -75,7 +78,12 @@ pub struct Pyc {
 }
 
 impl Pyc {
-    fn is_likely_valid<F: Read>(f: &mut F) -> Result<()> {
+    /// Checks if the given file seems to be a .pyc file.
+    /// # Errors
+    /// Returns:
+    /// - `Ok(())` if the file seems to be a .pyc file.
+    /// - `Err(...)` if the file is not recognized as a valid .pyc file.
+    pub fn is_likely_valid<F: Read>(f: &mut F) -> Result<()> {
         let _: PycMetadata = Self::read_metadata(f)?;
         Ok(())
     }
@@ -114,12 +122,17 @@ impl Pyc {
         })
     }
 
+    /// Converts the given .pyc version id into a version string.
+    /// # Errors
+    /// Returns:
+    /// - `Some(...)` if the version id corresponds to an known Python version.
+    /// - `None` if the version id is unrecognized.
     #[must_use]
-    pub fn version_id_to_string(magic_number: u16) -> Option<&'static str> {
+    pub fn version_id_to_string(version_id: u16) -> Option<&'static str> {
         #[allow(unreachable_patterns)]
         #[allow(clippy::match_same_arms)]
         #[allow(clippy::match_overlapping_arm)]
-        match magic_number {
+        match version_id {
             20121 => Some("Python 1.5"),
             20121 => Some("Python 1.5.1"),
             20121 => Some("Python 1.5.2"),
@@ -218,7 +231,12 @@ impl Pyc {
         }
     }
 
-    fn try_parse<F: Read>(f: &mut F) -> Result<Self> {
+    /// Parses the given .pyc file.
+    /// # Errors
+    /// Returns:
+    /// - `Ok(...)` if the .pyc file was successfully parsed into metadata and a `code` object.
+    /// - `Err(...)` if an error occured while parsing the .pyc file.
+    pub fn try_parse<F: Read>(f: &mut F) -> Result<Self> {
         let metadata = Self::read_metadata(f)?;
         let code = marshal_load_ex(
             f,
@@ -233,6 +251,7 @@ impl Pyc {
 }
 
 bitflags! {
+    /// `code` object flags.
     pub struct CodeFlags: u32 {
         const OPTIMIZED                   = 0x1;
         const NEWLOCALS                   = 0x2;
