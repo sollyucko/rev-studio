@@ -594,7 +594,7 @@ pub enum Instruction {
 
 #[cfg(test)]
 mod tests {
-    use super::try_parse_code_struct;
+    use super::{try_parse_code_struct, Instruction};
     use rev_studio_fmt_pyc::Pyc;
 
     #[test]
@@ -616,6 +616,11 @@ mod tests {
         ];
         let pyc = Pyc::try_parse(&mut test_file).unwrap();
         let instructions = try_parse_code_struct(pyc.code).unwrap();
-        println!("{:?}", instructions);
+        match &instructions[..] {
+            &[Instruction::LOAD_CONST(ref none), Instruction::RETURN_VALUE] => {
+                assert!(none.is_none(), "{:?}", none);
+            }
+            x => panic!("{:?}", x),
+        }
     }
 }
