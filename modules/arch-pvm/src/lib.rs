@@ -1,28 +1,64 @@
 use bitflags::bitflags;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::FromPrimitive;
-use pyo3::PyObject;
-use rev_studio_fmt_pyc::CodeObject;
-use std::rc::Rc;
+use py_marshal::{Code, Obj};
+use std::sync::Arc;
 
-pub fn parse_code_obj(
-    code_obj: Rc<CodeObject>,
-) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
+#[derive(Clone, Debug)]
+struct CodeIter {
+    code_struct: Arc<Code>,
+    idx: usize,
+}
+
+impl Iterator for CodeIter {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<u8> {
+        if self.idx < self.code_struct.code.len() {
+            let result = self.code_struct.code[self.idx];
+            self.idx += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+/// Attempts to parse the given `code_struct` into a `Iterator<Result<Instruction>>`.
+///
+/// # Errors
+/// - `Ok(...)` indicates success.
+/// - `Err(Ok(...), ...)` means that the instruction had an illegal data value,
+///   or that `ExtendedArg` was mis-parsed (likely an internal error).
+/// - `Err(Err(...), ...)` means that an invalid instruction was encountered.
+pub fn parse_code_struct(
+    code_struct: Arc<Code>,
+) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> + Clone {
     instructions_from_op_codes(
-        parse_extended_arg(op_codes_from_bytes(Rc::clone(&code_obj).iter_code_rc())),
-        code_obj,
+        parse_extended_arg(op_codes_from_bytes(CodeIter {
+            code_struct: Arc::clone(&code_struct),
+            idx: 0,
+        })),
+        code_struct,
     )
 }
 
-pub fn try_parse_code_obj(
-    code_obj: Rc<CodeObject>,
+/// Attempts to parse the given `code_struct` into a `Result<Vec<Instruction>>`.
+///
+/// # Errors
+/// - `Ok(...)` indicates success.
+/// - `Err(Ok(...), ...)` means that the instruction had an illegal data value,
+///   or that `ExtendedArg` was mis-parsed (likely an internal error).
+/// - `Err(Err(...), ...)` means that an invalid instruction was encountered.
+pub fn try_parse_code_struct(
+    code_struct: Arc<Code>,
 ) -> Result<Vec<Instruction>, (Result<OpCode, u8>, u32)> {
-    parse_code_obj(code_obj).collect()
+    parse_code_struct(code_struct).collect()
 }
 
 fn op_codes_from_bytes(
     code: impl Iterator<Item = u8> + Clone,
-) -> impl Iterator<Item = (Result<OpCode, u8>, u8)> {
+) -> impl Iterator<Item = (Result<OpCode, u8>, u8)> + Clone {
     let mut code2 = code.clone();
     code2.next();
     let op_codes = code.step_by(2).map(|x| OpCode::from_u8(x).ok_or(x));
@@ -30,13 +66,12 @@ fn op_codes_from_bytes(
     op_codes.zip(args)
 }
 
-struct ParseExtendedArgIter<CodeIter: Iterator<Item = (Result<OpCode, u8>, u8)>> {
-    op_codes: CodeIter,
+#[derive(Clone, Debug)]
+struct ParseExtendedArgIter<I: Iterator<Item = (Result<OpCode, u8>, u8)> + Clone> {
+    op_codes: I,
 }
 
-impl<CodeIter: Iterator<Item = (Result<OpCode, u8>, u8)>> Iterator
-    for ParseExtendedArgIter<CodeIter>
-{
+impl<I: Iterator<Item = (Result<OpCode, u8>, u8)> + Clone> Iterator for ParseExtendedArgIter<I> {
     type Item = (Result<OpCode, u8>, u32);
 
     fn next(&mut self) -> Option<(Result<OpCode, u8>, u32)> {
@@ -54,14 +89,15 @@ impl<CodeIter: Iterator<Item = (Result<OpCode, u8>, u8)>> Iterator
 }
 
 fn parse_extended_arg(
-    op_codes: impl Iterator<Item = (Result<OpCode, u8>, u8)>,
-) -> impl Iterator<Item = (Result<OpCode, u8>, u32)> {
+    op_codes: impl Iterator<Item = (Result<OpCode, u8>, u8)> + Clone,
+) -> impl Iterator<Item = (Result<OpCode, u8>, u32)> + Clone {
     ParseExtendedArgIter { op_codes }
 }
 
 // TODO: add past instructions
+/// A Python opcode with no associated data.
 #[allow(non_camel_case_types)]
-#[derive(PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum OpCode {
     POP_TOP = 1,
     ROT_TWO = 2,
@@ -172,11 +208,11 @@ pub enum OpCode {
     SET_ADD = 146,
     MAP_ADD = 147,
     LOAD_CLASSDEREF = 148,
-	BUILD_LIST_UNPACK = 149,
-	BUILD_MAP_UNPACK = 150,
-	BUILD_MAP_UNPACK_WITH_CALL = 151,
-	BUILD_TUPLE_UNPACK = 152,
-	BUILD_SET_UNPACK = 153,
+    BUILD_LIST_UNPACK = 149,
+    BUILD_MAP_UNPACK = 150,
+    BUILD_MAP_UNPACK_WITH_CALL = 151,
+    BUILD_TUPLE_UNPACK = 152,
+    BUILD_SET_UNPACK = 153,
     SETUP_ASYNC_WITH = 154,
     FORMAT_VALUE = 155,
     BUILD_CONST_KEY_MAP = 156,
@@ -190,7 +226,8 @@ pub enum OpCode {
     DICT_UPDATE = 165,
 }
 
-#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
+/// The parameter of `COMPARE_OP`.
+#[derive(Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum CmpOp {
     Lt = 0, // <
     Le = 1, // <=
@@ -206,20 +243,23 @@ pub enum CmpOp {
     Bad = 11,
 }
 
-#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
+/// The parameter of `RAISE_VARARGS`.
+#[derive(Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum RaiseForm {
     ReRaise = 0,
     Raise = 1,
     RaiseFrom = 2,
 }
 
-#[derive(PartialEq, Eq, Debug, FromPrimitive, ToPrimitive)]
+/// The parameter of `BUILD_SLICE`.
+#[derive(Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum BuildSliceArgc {
     StartStop = 2,
     StartStopStep = 3,
 }
 
 bitflags! {
+    /// The parameter of `MAKE_FUNCTION`.
     #[derive(Default)]
     pub struct MakeFunctionFlags: u8 {
         const POSITIONAL_DEFAULTS = 0b0000_0001;
@@ -230,6 +270,7 @@ bitflags! {
 }
 
 bitflags! {
+    /// The parameter of `CALL_FUNCTION_EX`.
     #[derive(Default)]
     pub struct CallFunctionExFlags: u8 {
         const KWARGS = 0b0000_0001;
@@ -239,9 +280,9 @@ bitflags! {
 // TODO: may depend on version
 #[allow(clippy::too_many_lines)]
 fn instructions_from_op_codes(
-    op_codes: impl Iterator<Item = (Result<OpCode, u8>, u32)>,
-    code_obj: Rc<CodeObject>,
-) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> {
+    op_codes: impl Iterator<Item = (Result<OpCode, u8>, u32)> + Clone,
+    code_struct: Arc<Code>,
+) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> + Clone {
     op_codes.map(move |(op_code, data)| {
         (|| match op_code {
             Ok(OpCode::POP_TOP) => Some(Instruction::POP_TOP),
@@ -305,10 +346,10 @@ fn instructions_from_op_codes(
             Ok(OpCode::POP_BLOCK) => Some(Instruction::POP_BLOCK),
             Ok(OpCode::POP_EXCEPT) => Some(Instruction::POP_EXCEPT),
             Ok(OpCode::STORE_NAME) => Some(Instruction::STORE_NAME(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::DELETE_NAME) => Some(Instruction::DELETE_NAME(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::UNPACK_SEQUENCE) => Some(Instruction::UNPACK_SEQUENCE(data)),
             Ok(OpCode::FOR_ITER) => Some(Instruction::FOR_ITER(data)),
@@ -317,36 +358,36 @@ fn instructions_from_op_codes(
                 Some(Instruction::UNPACK_EX { before, after })
             }
             Ok(OpCode::STORE_ATTR) => Some(Instruction::STORE_ATTR(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::DELETE_ATTR) => Some(Instruction::DELETE_ATTR(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::STORE_GLOBAL) => Some(Instruction::STORE_GLOBAL(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::DELETE_GLOBAL) => Some(Instruction::DELETE_GLOBAL(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::LOAD_CONST) => Some(Instruction::LOAD_CONST(
-                code_obj.consts[data as usize].clone(), // Rc::clone
+                code_struct.consts[data as usize].clone(), // Rc::clone
             )),
             Ok(OpCode::LOAD_NAME) => Some(Instruction::LOAD_NAME(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::BUILD_TUPLE) => Some(Instruction::BUILD_TUPLE(data)),
             Ok(OpCode::BUILD_LIST) => Some(Instruction::BUILD_LIST(data)),
             Ok(OpCode::BUILD_SET) => Some(Instruction::BUILD_SET(data)),
             Ok(OpCode::BUILD_MAP) => Some(Instruction::BUILD_MAP(data)),
             Ok(OpCode::LOAD_ATTR) => Some(Instruction::LOAD_ATTR(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::COMPARE_OP) => Some(Instruction::COMPARE_OP(CmpOp::from_u32(data)?)),
             Ok(OpCode::IMPORT_NAME) => Some(Instruction::IMPORT_NAME(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::IMPORT_FROM) => Some(Instruction::IMPORT_FROM(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::JUMP_FORWARD) => Some(Instruction::JUMP_FORWARD(data)),
             Ok(OpCode::JUMP_IF_FALSE_OR_POP) => Some(Instruction::JUMP_IF_FALSE_OR_POP(data)),
@@ -355,20 +396,20 @@ fn instructions_from_op_codes(
             Ok(OpCode::POP_JUMP_IF_FALSE) => Some(Instruction::POP_JUMP_IF_FALSE(data)),
             Ok(OpCode::POP_JUMP_IF_TRUE) => Some(Instruction::POP_JUMP_IF_TRUE(data)),
             Ok(OpCode::LOAD_GLOBAL) => Some(Instruction::LOAD_GLOBAL(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::IS_OP) => Some(Instruction::IS_OP(data == 0)),
             Ok(OpCode::CONTAINS_OP) => Some(Instruction::CONTAINS_OP(data == 0)),
             Ok(OpCode::JUMP_IF_NOT_EXC_MATCH) => Some(Instruction::JUMP_IF_NOT_EXC_MATCH(data)),
             Ok(OpCode::SETUP_FINALLY) => Some(Instruction::SETUP_FINALLY(data)),
             Ok(OpCode::LOAD_FAST) => Some(Instruction::LOAD_FAST(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::STORE_FAST) => Some(Instruction::STORE_FAST(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::DELETE_FAST) => Some(Instruction::DELETE_FAST(
-                code_obj.names[data as usize].clone(),
+                code_struct.names[data as usize].clone(),
             )),
             Ok(OpCode::RAISE_VARARGS) => {
                 Some(Instruction::RAISE_VARARGS(RaiseForm::from_u32(data)?))
@@ -395,29 +436,35 @@ fn instructions_from_op_codes(
             Ok(OpCode::LOAD_CLASSDEREF) => Some(Instruction::LOAD_CLASSDEREF(data)),
             Ok(OpCode::BUILD_LIST_UNPACK) => Some(Instruction::BUILD_LIST_UNPACK(data)),
             Ok(OpCode::BUILD_MAP_UNPACK) => Some(Instruction::BUILD_MAP_UNPACK(data)),
-            Ok(OpCode::BUILD_MAP_UNPACK_WITH_CALL) => Some(Instruction::BUILD_MAP_UNPACK_WITH_CALL(data)),
+            Ok(OpCode::BUILD_MAP_UNPACK_WITH_CALL) => {
+                Some(Instruction::BUILD_MAP_UNPACK_WITH_CALL(data))
+            }
             Ok(OpCode::BUILD_TUPLE_UNPACK) => Some(Instruction::BUILD_TUPLE_UNPACK(data)),
             Ok(OpCode::BUILD_SET_UNPACK) => Some(Instruction::BUILD_SET_UNPACK(data)),
             Ok(OpCode::SETUP_ASYNC_WITH) => Some(Instruction::SETUP_ASYNC_WITH),
             Ok(OpCode::FORMAT_VALUE) => Some(Instruction::FORMAT_VALUE),
             Ok(OpCode::BUILD_CONST_KEY_MAP) => Some(Instruction::BUILD_CONST_KEY_MAP(data)),
             Ok(OpCode::BUILD_STRING) => Some(Instruction::BUILD_STRING(data)),
-            Ok(OpCode::BUILD_TUPLE_UNPACK_WITH_CALL) => Some(Instruction::BUILD_TUPLE_UNPACK_WITH_CALL(data)),
+            Ok(OpCode::BUILD_TUPLE_UNPACK_WITH_CALL) => {
+                Some(Instruction::BUILD_TUPLE_UNPACK_WITH_CALL(data))
+            }
             Ok(OpCode::LOAD_METHOD) => Some(Instruction::LOAD_METHOD),
             Ok(OpCode::CALL_METHOD) => Some(Instruction::CALL_METHOD),
             Ok(OpCode::LIST_EXTEND) => Some(Instruction::LIST_EXTEND(data)),
             Ok(OpCode::SET_UPDATE) => Some(Instruction::SET_UPDATE(data)),
             Ok(OpCode::DICT_MERGE) => Some(Instruction::DICT_MERGE(data)),
             Ok(OpCode::DICT_UPDATE) => Some(Instruction::DICT_UPDATE(data)),
-            _ => None,
+            Ok(OpCode::EXTENDED_ARG) | Err(_) => None,
         })()
         .ok_or((op_code, data))
     })
 }
 
-/// Same *relative ordering* as OpCode
+/// A fully-parsed Python instruction.
+///
+/// Has the same *relative ordering* as [`OpCode`]
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Instruction {
     POP_TOP,
     ROT_TWO,
@@ -479,39 +526,39 @@ pub enum Instruction {
     YIELD_VALUE,
     POP_BLOCK,
     POP_EXCEPT,
-    STORE_NAME(String),
-    DELETE_NAME(String),
+    STORE_NAME(Arc<String>),
+    DELETE_NAME(Arc<String>),
     UNPACK_SEQUENCE(u32),
     FOR_ITER(u32),
     UNPACK_EX { before: u8, after: u8 },
-    STORE_ATTR(String),
-    DELETE_ATTR(String),
-    STORE_GLOBAL(String),
-    DELETE_GLOBAL(String),
-    LOAD_CONST(Rc<PyObject>), // XXX: Use repr?
-    LOAD_NAME(String),
+    STORE_ATTR(Arc<String>),
+    DELETE_ATTR(Arc<String>),
+    STORE_GLOBAL(Arc<String>),
+    DELETE_GLOBAL(Arc<String>),
+    LOAD_CONST(Obj),
+    LOAD_NAME(Arc<String>),
     BUILD_TUPLE(u32),
     BUILD_LIST(u32),
     BUILD_SET(u32),
     BUILD_MAP(u32),
-    LOAD_ATTR(String),
+    LOAD_ATTR(Arc<String>),
     COMPARE_OP(CmpOp),
-    IMPORT_NAME(String),
-    IMPORT_FROM(String),
+    IMPORT_NAME(Arc<String>),
+    IMPORT_FROM(Arc<String>),
     JUMP_FORWARD(u32),
     JUMP_IF_FALSE_OR_POP(u32),
     JUMP_IF_TRUE_OR_POP(u32),
     JUMP_ABSOLUTE(u32),
     POP_JUMP_IF_FALSE(u32),
     POP_JUMP_IF_TRUE(u32),
-    LOAD_GLOBAL(String),
+    LOAD_GLOBAL(Arc<String>),
     IS_OP(bool),
     CONTAINS_OP(bool),
     JUMP_IF_NOT_EXC_MATCH(u32),
     SETUP_FINALLY(u32),
-    LOAD_FAST(String),
-    STORE_FAST(String),
-    DELETE_FAST(String),
+    LOAD_FAST(Arc<String>),
+    STORE_FAST(Arc<String>),
+    DELETE_FAST(Arc<String>),
     RAISE_VARARGS(RaiseForm),
     CALL_FUNCTION(u32),
     MAKE_FUNCTION(MakeFunctionFlags),
