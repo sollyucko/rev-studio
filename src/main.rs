@@ -41,7 +41,7 @@ pub mod bytecode_format {
 */
 
 /*trait FileData : From<BufRead> {
-    fn from<R : BufRead>(reader: R) -> Self where Self : Sized;    
+    fn from<R : BufRead>(reader: R) -> Self where Self : Sized;
 }
 
 trait ArchiveOf<F : FileData, M: Map<Key=String, Value=F>> : FileData {
@@ -51,8 +51,6 @@ trait ArchiveOf<F : FileData, M: Map<Key=String, Value=F>> : FileData {
 trait BytecodeInstr {}
 
 trait Bytecode<B : BytecodeInstr>: List<Item=B> {}*/
-
-
 
 fn main() {
     println!("Hello, world!");
