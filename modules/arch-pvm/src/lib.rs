@@ -2,6 +2,7 @@ use bitflags::bitflags;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::FromPrimitive;
 use py_marshal::{Code, Obj};
+use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -78,10 +79,9 @@ impl<I: Iterator<Item = (Result<OpCode, u8>, u8)> + Clone> Iterator for ParseExt
         let mut value: u32 = 0;
         loop {
             let (op_code, byte) = self.op_codes.next()?;
-            if op_code == Ok(OpCode::EXTENDED_ARG) {
-                value *= 256;
-                value += u32::from(byte);
-            } else {
+            value *= 256;
+            value += u32::from(byte);
+            if op_code != Ok(OpCode::EXTENDED_ARG) {
                 return Some((op_code, value));
             }
         }
@@ -97,7 +97,7 @@ fn parse_extended_arg(
 // TODO: add past instructions
 /// A Python opcode with no associated data.
 #[allow(non_camel_case_types)]
-#[derive(Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum OpCode {
     POP_TOP = 1,
     ROT_TWO = 2,
@@ -594,8 +594,13 @@ pub enum Instruction {
 
 #[cfg(test)]
 mod tests {
-    use super::{try_parse_code_struct, Instruction};
+    use super::{
+        instructions_from_op_codes, op_codes_from_bytes, parse_extended_arg, try_parse_code_struct,
+        CodeIter, Instruction,
+    };
+    use num_bigint::BigInt;
     use rev_studio_fmt_pyc::Pyc;
+    use std::sync::Arc;
 
     #[test]
     fn test_minimal_file_37() {
@@ -611,7 +616,7 @@ mod tests {
             0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x70, 0x79,
             0x74, 0x68, 0x6f, 0x6e, 0x5f, 0x6d, 0x69, 0x6e, 0x69, 0x6d, 0x61, 0x6c, 0x2e, 0x70,
             0x79, 0xda, 0x08, 0x3c, 0x6d, 0x6f, 0x64, 0x75, 0x6c, 0x65, 0x3e, 0x01, 0x00, 0x00,
-            0x00, 0xf3, 0x00, 0x00, 0x00, 0x00
+            0x00, 0xf3, 0x00, 0x00, 0x00, 0x00,
         ];
         let pyc = Pyc::try_parse(&mut test_file).unwrap();
         println!("{:?}", pyc);
@@ -619,6 +624,51 @@ mod tests {
         println!("{:?}", instructions);
         match &instructions[..] {
             &[Instruction::LOAD_CONST(ref none), Instruction::RETURN_VALUE] => {
+                assert!(none.is_none(), "{:?}", none);
+            }
+            x => panic!("{:?}", x),
+        }
+    }
+
+    #[test]
+    fn test_more_37() {
+        let mut test_file: &[u8] = &[
+            0x42, 0x0d, 0x0d, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x3b, 0x53, 0xbc, 0x5e, 0x10, 0x00,
+            0x00, 0x00, 0xe3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x73, 0x0c, 0x00, 0x00, 0x00,
+            0x65, 0x00, 0x64, 0x00, 0x83, 0x01, 0x01, 0x00, 0x64, 0x01, 0x53, 0x00, 0x29, 0x02,
+            0x69, 0x56, 0x34, 0x12, 0x00, 0x4e, 0x29, 0x01, 0xda, 0x05, 0x70, 0x72, 0x69, 0x6e,
+            0x74, 0xa9, 0x00, 0x72, 0x02, 0x00, 0x00, 0x00, 0x72, 0x02, 0x00, 0x00, 0x00, 0xfa,
+            0x4e, 0x2f, 0x68, 0x6f, 0x6d, 0x65, 0x2f, 0x73, 0x6f, 0x6c, 0x6f, 0x6d, 0x6f, 0x6e,
+            0x75, 0x2f, 0x44, 0x6f, 0x63, 0x75, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x2f, 0x43, 0x6f,
+            0x64, 0x65, 0x2f, 0x52, 0x75, 0x73, 0x74, 0x2f, 0x72, 0x65, 0x76, 0x2d, 0x73, 0x74,
+            0x75, 0x64, 0x69, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x5f, 0x64, 0x61, 0x74, 0x61,
+            0x2f, 0x70, 0x79, 0x74, 0x68, 0x6f, 0x6e, 0x5f, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x64,
+            0x65, 0x64, 0x5f, 0x61, 0x72, 0x67, 0x2e, 0x70, 0x79, 0xda, 0x08, 0x3c, 0x6d, 0x6f,
+            0x64, 0x75, 0x6c, 0x65, 0x3e, 0x01, 0x00, 0x00, 0x00, 0xf3, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let pyc = Pyc::try_parse(&mut test_file).unwrap();
+        println!("{:?}", pyc);
+        let op_codes = op_codes_from_bytes(CodeIter {
+            code_struct: Arc::clone(&pyc.code),
+            idx: 0,
+        })
+        .collect::<Vec<_>>();
+        println!("{:?}", op_codes);
+        let parsed_ext_arg = parse_extended_arg(op_codes.iter().copied()).collect::<Vec<_>>();
+        println!("{:?}", parsed_ext_arg);
+        let instructions = instructions_from_op_codes(parsed_ext_arg.iter().copied(), pyc.code)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        println!("{:?}", instructions);
+        match &instructions[..] {
+            &[Instruction::LOAD_NAME(ref print), Instruction::LOAD_CONST(ref num), Instruction::CALL_FUNCTION(1), Instruction::POP_TOP, Instruction::LOAD_CONST(ref none), Instruction::RETURN_VALUE] =>
+            {
+                assert_eq!(**print, "print");
+                assert_eq!(
+                    *num.clone().extract_long().unwrap(),
+                    BigInt::from(0x0012_3456)
+                );
                 assert!(none.is_none(), "{:?}", none);
             }
             x => panic!("{:?}", x),
