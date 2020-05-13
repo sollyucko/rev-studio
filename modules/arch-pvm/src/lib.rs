@@ -28,9 +28,9 @@ impl Iterator for CodeIter {
 ///
 /// # Errors
 /// - `Ok(...)` indicates success.
-/// - `Err(Ok(...), ...)` means that the instruction had an illegal data value,
+/// - `Err((Ok(...), ...))` means that the instruction had an illegal data value,
 ///   or that `ExtendedArg` was mis-parsed (likely an internal error).
-/// - `Err(Err(...), ...)` means that an invalid instruction was encountered.
+/// - `Err((Err(...), ...))` means that an invalid instruction was encountered.
 pub fn parse_code_struct(
     code_struct: Arc<Code>,
 ) -> impl Iterator<Item = Result<Instruction, (Result<OpCode, u8>, u32)>> + Clone {
