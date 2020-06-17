@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 rev-studio-arch-pvm = { path = '../arch-pvm' }
+num-bigint = "0.3"
