@@ -206,7 +206,7 @@ pub enum Statement {
         decorators: BoxedSlice<Decorator>,
         is_async: bool,
         name: Name,
-        parameters: Parameters<Annotatable<Name>>,
+        parameters: Box<Parameters<Annotatable<Name>>>,
         return_annotation: Option<Box<Expression>>,
         body: Suite,
     },
