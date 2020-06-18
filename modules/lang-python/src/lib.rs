@@ -1,10 +1,13 @@
 use num_bigint::BigInt;
 use rev_studio_arch_pvm::Instruction;
+use std::sync::Arc;
 
 #[must_use]
 pub fn convert_instructions_to_ast(instructions: &[Instruction]) -> Suite {
     todo!("{:?}", instructions)
 }
+
+type BoxedSlice<T> = Box<[T]>;
 
 // Based on:
 // - <https://docs.python.org/3/reference/grammar.html>
@@ -16,9 +19,9 @@ pub fn convert_instructions_to_ast(instructions: &[Instruction]) -> Suite {
 // - <https://docs.python.org/3/library/operator.html>
 // - <https://docs.python.org/3/c-api/code.html>
 
-pub struct Name(pub String);
+pub struct Name(pub Arc<String>);
 
-pub struct DottedName(pub Vec<Name>);
+pub struct DottedName(pub BoxedSlice<Name>);
 
 pub struct WithAsClause<T> {
     pub value: T,
@@ -48,8 +51,8 @@ pub enum Assignable {
         name: Name,
     },
     Starred(Box<Expression>),
-    List(Vec<Assignable>),
-    Tuple(Vec<Assignable>),
+    List(BoxedSlice<Assignable>),
+    Tuple(BoxedSlice<Assignable>),
 }
 
 pub struct ConditionedSuite {
@@ -65,16 +68,16 @@ pub struct Decorator {
 pub enum Expression {
     Assignment(Assignable, Box<Expression>),
     IfElse(Box<Expression>, Box<Expression>, Box<Expression>),
-    Lambda(Parameters<Name>, Box<Expression>),
+    Lambda(Box<Parameters<Name>>, Box<Expression>),
     UnaryOp(UnaryOp, Box<Expression>),
     BinaryOp(Box<Expression>, BinaryOp, Box<Expression>),
     Call(Box<Expression>, Arguments),
     Subscript(Box<Expression>, Subscript),
     Attribute(Box<Expression>, Name),
-    Tuple(Vec<Expression>),
-    List(Vec<Expression>),
-    Set(Vec<Expression>),
-    Dict(Vec<DictEntry>),
+    Tuple(BoxedSlice<Expression>),
+    List(BoxedSlice<Expression>),
+    Set(BoxedSlice<Expression>),
+    Dict(BoxedSlice<DictEntry>),
     TupleComprehension(Comprehension<IterableItem>),
     ListComprehension(Comprehension<IterableItem>),
     SetComprehension(Comprehension<IterableItem>),
@@ -136,7 +139,7 @@ pub struct DictEntry {
 pub struct Comprehension<T> {
     pub is_async: bool,
     pub entry: T,
-    pub clauses: Vec<ComprehensionClause>,
+    pub clauses: BoxedSlice<ComprehensionClause>,
 }
 
 pub enum ComprehensionClause {
@@ -154,53 +157,53 @@ pub enum DictItem {
     StarStar(Box<Expression>),
 }
 
-pub struct Suite(Vec<Statement>);
+pub struct Suite(BoxedSlice<Statement>);
 
 pub enum Statement {
-    Expression(Expression),
-    Assignment(Annotatable<Assignable>, Expression),
-    AugAssignment(AugAssignable, Expression),
-    Del(Vec<Name>),
+    Expression(Box<Expression>),
+    Assignment(Annotatable<Assignable>, Box<Expression>),
+    AugAssignment(AugAssignable, Box<Expression>),
+    Del(BoxedSlice<Name>),
     Pass,
     Break,
     Continue,
-    Return(Expression),
+    Return(Box<Expression>),
     Raise(Raise),
     Import(Import),
-    Global(Vec<Name>),
-    Nonlocal(Vec<Name>),
+    Global(BoxedSlice<Name>),
+    Nonlocal(BoxedSlice<Name>),
     Assert {
-        value: Expression,
+        value: Box<Expression>,
         message: Option<Box<Expression>>,
     },
     If {
-        ifs: Vec<ConditionedSuite>,
+        ifs: BoxedSlice<ConditionedSuite>,
         else_: Suite,
     },
     While {
-        while_: ConditionedSuite,
+        while_: Box<ConditionedSuite>,
         else_: Suite,
     },
     For {
         is_async: bool,
-        assignables: Vec<Assignable>,
+        assignables: BoxedSlice<Assignable>,
         expr: Assignable,
         body: Suite,
         else_: Suite,
     },
     Try {
         body: Suite,
-        excepts: Vec<WithAsClause<Expression>>,
+        excepts: BoxedSlice<WithAsClause<Expression>>,
         else_: Suite,
         finally_: Suite,
     },
     With {
         is_async: bool,
-        items: Vec<WithAsClause<Expression>>,
+        items: BoxedSlice<WithAsClause<Expression>>,
         body: Suite,
     },
     Def {
-        decorators: Vec<Decorator>,
+        decorators: BoxedSlice<Decorator>,
         is_async: bool,
         name: Name,
         parameters: Parameters<Annotatable<Name>>,
@@ -208,7 +211,7 @@ pub enum Statement {
         body: Suite,
     },
     Class {
-        decorators: Vec<Decorator>,
+        decorators: BoxedSlice<Decorator>,
         name: Name,
         arguments: Arguments,
         body: Suite,
@@ -218,35 +221,35 @@ pub enum Statement {
 #[allow(clippy::pub_enum_variant_names)]
 pub enum Raise {
     ReRaise,
-    Raise(Expression),
-    RaiseFrom(Expression, Expression),
+    Raise(Box<Expression>),
+    RaiseFrom(Box<Expression>, Box<Expression>),
 }
 
 pub enum Import {
-    Import(Vec<WithAsClause<DottedName>>),
+    Import(BoxedSlice<WithAsClause<DottedName>>),
     ImportFrom {
         level: usize,
         module_name: Option<DottedName>,
-        names: Vec<WithAsClause<Name>>,
+        names: BoxedSlice<WithAsClause<Name>>,
     },
 }
 
 pub struct Parameters<T> {
-    pub pos_only_args: Vec<T>,
-    pub pos_or_kw_args: Vec<T>,
+    pub pos_only_args: BoxedSlice<T>,
+    pub pos_or_kw_args: BoxedSlice<T>,
     pub varargs: Option<T>,
-    pub kw_only_args: Vec<T>,
+    pub kw_only_args: BoxedSlice<T>,
     pub kwvarargs: Option<T>,
 }
 
 pub struct Annotatable<T> {
     pub name: T,
-    pub annotation: Option<Box<Expression>>, // this doesn't need to be boxed, but it saves a ton of space when not used
+    pub annotation: Option<Box<Expression>>,
 }
 
 pub struct Arguments {
-    pub positional: Vec<PositionalArgument>,
-    pub keyword: Vec<KeywordArgument>,
+    pub positional: BoxedSlice<PositionalArgument>,
+    pub keyword: BoxedSlice<KeywordArgument>,
 }
 
 pub enum PositionalArgument {
@@ -261,8 +264,18 @@ pub enum KeywordArgument {
 
 #[cfg(test)]
 mod tests {
+    use crate::*;
+    use std::mem::size_of;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn print_sizes() {
+        println!("Expression: {}", size_of::<Expression>());
+        println!("Statement: {}", size_of::<Statement>());
+        println!("Name: {}", size_of::<Name>());
+        println!("BoxedSlice<Name>: {}", size_of::<Vec<Name>>());
+        println!("Parameters<Name>: {}", size_of::<Parameters<Name>>());
+        println!("Assignable: {}", size_of::<Assignable>());
+        println!("Comprehension<DictItem>: {}", size_of::<Comprehension<DictItem>>());
+        println!("Arguments: {}", size_of::<Arguments>());
     }
 }
