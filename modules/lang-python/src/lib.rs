@@ -225,12 +225,17 @@ pub enum Raise {
     RaiseFrom(Box<Expression>, Box<Expression>),
 }
 
+pub enum ImportNamesOrStar {
+    Star,
+    Names(BoxedSlice<WithAsClause<DottedName>>),
+}
+
 pub enum Import {
-    Import(BoxedSlice<WithAsClause<DottedName>>),
+    Import(ImportNamesOrStar),
     ImportFrom {
         level: usize,
         module_name: Option<DottedName>,
-        names: BoxedSlice<WithAsClause<Name>>,
+        names: ImportNamesOrStar,
     },
 }
 
