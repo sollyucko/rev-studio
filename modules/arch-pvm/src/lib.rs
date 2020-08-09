@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::FromPrimitive;
-use py_marshal::{Code, Obj};
+use py_marshal::Code;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -369,9 +369,7 @@ fn instructions_from_op_codes(
             Ok(OpCode::DELETE_GLOBAL) => Some(Instruction::DELETE_GLOBAL(
                 code_struct.names[data as usize].clone(),
             )),
-            Ok(OpCode::LOAD_CONST) => Some(Instruction::LOAD_CONST(
-                code_struct.consts[data as usize].clone(), // Rc::clone
-            )),
+            Ok(OpCode::LOAD_CONST) => Some(Instruction::LOAD_CONST(data)),
             Ok(OpCode::LOAD_NAME) => Some(Instruction::LOAD_NAME(
                 code_struct.names[data as usize].clone(),
             )),
@@ -535,7 +533,7 @@ pub enum Instruction {
     DELETE_ATTR(Arc<String>),
     STORE_GLOBAL(Arc<String>),
     DELETE_GLOBAL(Arc<String>),
-    LOAD_CONST(Obj),
+    LOAD_CONST(u32),
     LOAD_NAME(Arc<String>),
     BUILD_TUPLE(u32),
     BUILD_LIST(u32),
@@ -620,11 +618,11 @@ mod tests {
         ];
         let pyc = Pyc::try_parse(&mut test_file).unwrap();
         println!("{:?}", pyc);
-        let instructions = try_parse_code_struct(pyc.code).unwrap();
+        let instructions = try_parse_code_struct(Arc::clone(&pyc.code)).unwrap();
         println!("{:?}", instructions);
         match &instructions[..] {
-            &[Instruction::LOAD_CONST(ref none), Instruction::RETURN_VALUE] => {
-                assert!(none.is_none(), "{:?}", none);
+            &[Instruction::LOAD_CONST(none), Instruction::RETURN_VALUE] => {
+                assert!(pyc.code.consts[none as usize].is_none(), "{:?}", pyc.code.consts[none as usize]);
             }
             x => panic!("{:?}", x),
         }
@@ -657,19 +655,19 @@ mod tests {
         println!("{:?}", op_codes);
         let parsed_ext_arg = parse_extended_arg(op_codes.iter().copied()).collect::<Vec<_>>();
         println!("{:?}", parsed_ext_arg);
-        let instructions = instructions_from_op_codes(parsed_ext_arg.iter().copied(), pyc.code)
+        let instructions = instructions_from_op_codes(parsed_ext_arg.iter().copied(), Arc::clone(&pyc.code))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         println!("{:?}", instructions);
         match &instructions[..] {
-            &[Instruction::LOAD_NAME(ref print), Instruction::LOAD_CONST(ref num), Instruction::CALL_FUNCTION(1), Instruction::POP_TOP, Instruction::LOAD_CONST(ref none), Instruction::RETURN_VALUE] =>
+            &[Instruction::LOAD_NAME(ref print), Instruction::LOAD_CONST(num), Instruction::CALL_FUNCTION(1), Instruction::POP_TOP, Instruction::LOAD_CONST(none), Instruction::RETURN_VALUE] =>
             {
                 assert_eq!(**print, "print");
                 assert_eq!(
-                    *num.clone().extract_long().unwrap(),
+                    *pyc.code.consts[num as usize].clone().extract_long().unwrap(),
                     BigInt::from(0x0012_3456)
                 );
-                assert!(none.is_none(), "{:?}", none);
+                assert!(pyc.code.consts[none as usize].is_none(), "{:?}", pyc.code.consts[none as usize]);
             }
             x => panic!("{:?}", x),
         }
