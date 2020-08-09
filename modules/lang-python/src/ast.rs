@@ -1,5 +1,5 @@
+use fmt_utils::{Repeated, Separated};
 use num_bigint::BigInt;
-use std::fmt;
 use std::sync::Arc;
 
 // Based on:
@@ -16,13 +16,24 @@ use std::sync::Arc;
 pub struct Name(pub Arc<String>);
 /// ```
 /// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
 /// use rev_studio_lang_python::Name;
 ///
-/// assert_eq!(Name(Arc::new("a".to_owned())).to_string(), "a");
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Name(Arc::new("a".to_owned()))), "a");
 /// ```
-impl fmt::Display for Name {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", *self.0)
+impl fast_fmt::Fmt<fast_fmt::Display> for Name {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+        self.0.fmt(writer, strategy)
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+        self.0.size_hint(strategy)
     }
 }
 
@@ -30,23 +41,41 @@ impl fmt::Display for Name {
 pub struct DottedName(pub Box<[Name]>);
 /// ```
 /// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
 /// use rev_studio_lang_python::{DottedName, Name};
+///
+/// let mut buf = String::new();
 ///
 /// let a = Name(Arc::new("a".to_owned()));
 /// let b = Name(Arc::new("b".to_owned()));
 /// let c = Name(Arc::new("c".to_owned()));
-/// assert_eq!(DottedName(Box::new([a.clone()])).to_string(), "a");
-/// assert_eq!(DottedName(Box::new([a.clone(), b.clone()])).to_string(), "a.b");
-/// assert_eq!(DottedName(Box::new([a, b, c])).to_string(), "a.b.c");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone()]))), "a");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone(), b.clone()]))), "a.b");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a, b, c]))), "a.b.c");
 /// ```
-impl fmt::Display for DottedName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        assert!(!self.0.is_empty()); // I don't know of a use-case for an empty DottedName
-        write!(f, "{}", self.0[0])?;
-        for name in &self.0[1..] {
-            write!(f, ".{}", name)?;
-        }
-        Ok(())
+impl fast_fmt::Fmt<fast_fmt::Display> for DottedName {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+            Separated {
+                sep: '.',
+                iter: &*self.0,
+            }.fmt(
+            writer,
+            strategy,
+        )
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+        
+            Separated {
+                sep: '.',
+                iter: &*self.0,
+            }.size_hint(
+            strategy,
+        )
     }
 }
 
@@ -57,23 +86,40 @@ pub struct WithAsClause<T> {
 }
 /// ```
 /// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
 /// use rev_studio_lang_python::{Name, WithAsClause};
+///
+/// let mut buf = String::new();
 ///
 /// let a = Name(Arc::new("a".to_owned()));
 /// let b = Name(Arc::new("b".to_owned()));
-/// assert_eq!(WithAsClause { value: a.clone(), as_clause: None }.to_string(), "a");
-/// assert_eq!(WithAsClause { value: a, as_clause: Some(b) }.to_string(), "a as b");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a.clone(), as_clause: None }), "a");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a, as_clause: Some(b) }), "a as b");
 /// ```
-impl<T> fmt::Display for WithAsClause<T>
+impl<T> fast_fmt::Fmt<fast_fmt::Display> for WithAsClause<T>
 where
-    T: fmt::Display,
+    T: fast_fmt::Fmt<fast_fmt::Display>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.value)?;
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+        self.value.fmt(writer, strategy)?;
         if let Some(name) = &self.as_clause {
-            write!(f, " as {}", name)?;
+            writer.write_str(" as ")?;
+            name.fmt(writer, strategy)?;
         }
         Ok(())
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+        self.value.size_hint(strategy)
+            + if let Some(name) = &self.as_clause {
+                4 + name.0.len()
+            } else {
+                0
+            }
     }
 }
 
@@ -154,20 +200,25 @@ pub enum UnaryOp {
     Await,
 }
 /// ```
+/// use fmt_utils::fmt_to_cleared_string;
 /// use rev_studio_lang_python::UnaryOp;
 ///
-/// assert_eq!(UnaryOp::LogicalNot.to_string(), "!");
-/// assert_eq!(UnaryOp::Plus.to_string(), "+");
-/// assert_eq!(UnaryOp::Minus.to_string(), "-");
-/// assert_eq!(UnaryOp::BitwiseNot.to_string(), "~");
-/// assert_eq!(UnaryOp::Await.to_string(), "await ");
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::LogicalNot), "!");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Plus), "+");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Minus), "-");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::BitwiseNot), "~");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Await), "await ");
 /// ```
-impl fmt::Display for UnaryOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
+impl fast_fmt::Fmt<fast_fmt::Display> for UnaryOp {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        _strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+        
+            writer.write_str(match self {
                 Self::LogicalNot => "!",
                 Self::Plus => "+",
                 Self::Minus => "-",
@@ -175,6 +226,16 @@ impl fmt::Display for UnaryOp {
                 Self::Await => "await ",
             }
         )
+    }
+
+    fn size_hint(&self, _strategy: &fast_fmt::Display) -> usize {
+            match self {
+                Self::LogicalNot => "!",
+                Self::Plus => "+",
+                Self::Minus => "-",
+                Self::BitwiseNot => "~",
+                Self::Await => "await ",
+            }.len()
     }
 }
 
@@ -207,40 +268,44 @@ pub enum BinaryOp {
     Pow,
 }
 /// ```
+/// use fmt_utils::fmt_to_cleared_string;
 /// use rev_studio_lang_python::BinaryOp;
 ///
-/// assert_eq!(BinaryOp::LogicalOr.to_string(), " or ");
-/// assert_eq!(BinaryOp::LogicalAnd.to_string(), " and ");
-/// assert_eq!(BinaryOp::Lt.to_string(), " < ");
-/// assert_eq!(BinaryOp::Le.to_string(), " <= ");
-/// assert_eq!(BinaryOp::Eq.to_string(), " == ");
-/// assert_eq!(BinaryOp::Ne.to_string(), " != ");
-/// assert_eq!(BinaryOp::Gt.to_string(), " > ");
-/// assert_eq!(BinaryOp::Ge.to_string(), " >= ");
-/// assert_eq!(BinaryOp::In.to_string(), " in ");
-/// assert_eq!(BinaryOp::NotIn.to_string(), " not in ");
-/// assert_eq!(BinaryOp::Is.to_string(), " is ");
-/// assert_eq!(BinaryOp::IsNot.to_string(), " is not ");
-/// assert_eq!(BinaryOp::BitwiseOr.to_string(), " | ");
-/// assert_eq!(BinaryOp::BitwiseXor.to_string(), " ^ ");
-/// assert_eq!(BinaryOp::BitwiseAnd.to_string(), " & ");
-/// assert_eq!(BinaryOp::LeftShift.to_string(), " << ");
-/// assert_eq!(BinaryOp::RightShift.to_string(), " >> ");
-/// assert_eq!(BinaryOp::Add.to_string(), " + ");
-/// assert_eq!(BinaryOp::Sub.to_string(), " - ");
-/// assert_eq!(BinaryOp::Mul.to_string(), " * ");
-/// assert_eq!(BinaryOp::MatMul.to_string(), " @ ");
-/// assert_eq!(BinaryOp::TrueDiv.to_string(), " / ");
-/// assert_eq!(BinaryOp::Mod.to_string(), " % ");
-/// assert_eq!(BinaryOp::FloorDiv.to_string(), " // ");
-/// assert_eq!(BinaryOp::Pow.to_string(), " ** ");
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalOr), " or ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalAnd), " and ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Lt), " < ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Le), " <= ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Eq), " == ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ne), " != ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Gt), " > ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ge), " >= ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::In), " in ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::NotIn), " not in ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Is), " is ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::IsNot), " is not ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseOr), " | ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseXor), " ^ ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseAnd), " & ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LeftShift), " << ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::RightShift), " >> ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Add), " + ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Sub), " - ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mul), " * ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::MatMul), " @ ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::TrueDiv), " / ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mod), " % ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::FloorDiv), " // ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Pow), " ** ");
 /// ```
-impl fmt::Display for BinaryOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            " {} ",
-            match self {
+impl fast_fmt::Fmt<fast_fmt::Display> for BinaryOp {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        _strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+            writer.write_str(match self {
                 Self::LogicalOr => "or",
                 Self::LogicalAnd => "and",
                 Self::Lt => "<",
@@ -268,6 +333,36 @@ impl fmt::Display for BinaryOp {
                 Self::Pow => "**",
             }
         )
+    }
+
+    fn size_hint(&self, _strategy: &fast_fmt::Display) -> usize {
+            match self {
+                Self::LogicalOr => "or",
+                Self::LogicalAnd => "and",
+                Self::Lt => "<",
+                Self::Le => "<=",
+                Self::Eq => "==",
+                Self::Ne => "!=",
+                Self::Gt => ">",
+                Self::Ge => ">=",
+                Self::In => "in",
+                Self::NotIn => "not in",
+                Self::Is => "is",
+                Self::IsNot => "is not",
+                Self::BitwiseOr => "|",
+                Self::BitwiseXor => "^",
+                Self::BitwiseAnd => "&",
+                Self::LeftShift => "<<",
+                Self::RightShift => ">>",
+                Self::Add => "+",
+                Self::Sub => "-",
+                Self::Mul => "*",
+                Self::MatMul => "@",
+                Self::TrueDiv => "/",
+                Self::Mod => "%",
+                Self::FloorDiv => "//",
+                Self::Pow => "**",
+            }.len()
     }
 }
 
@@ -380,18 +475,174 @@ pub enum Raise {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportList(pub Box<[WithAsClause<DottedName>]>);
+/// ```
+/// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
+/// use rev_studio_lang_python::{DottedName, ImportList, Name, WithAsClause};
+///
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, ImportList(Box::new([
+///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("abc")))])), as_clause: None},
+///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("de")))])), as_clause: Some(Name(Arc::new(String::from("f"))))},
+/// ]))), "abc, de as f");
+/// ```
+impl fast_fmt::Fmt<fast_fmt::Display> for ImportList {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+            Separated {
+                sep: ", ",
+                iter: &*self.0,
+            }.fmt(
+            writer,
+            strategy,
+        )
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+            Separated {
+                sep: ", ",
+                iter: &*self.0,
+            }.size_hint(
+            strategy,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportListOrStar {
+    Star,
+    Names(ImportList),
+}
+/// ```
+/// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
+/// use rev_studio_lang_python::{DottedName, ImportList, ImportListOrStar, Name, WithAsClause};
+///
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, ImportListOrStar::Star), "*");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, ImportListOrStar::Names(ImportList(Box::new([
+///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("abc")))])), as_clause: None},
+///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("de")))])), as_clause: Some(Name(Arc::new(String::from("f"))))},
+/// ])))), "abc, de as f");
+/// ```
+impl fast_fmt::Fmt<fast_fmt::Display> for ImportListOrStar {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
+        match self {
+            Self::Star => writer.write_char('*'),
+            Self::Names(names) => names.fmt(writer, strategy),
+        }
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+        match self {
+            Self::Star => 1,
+            Self::Names(names) => names.size_hint(strategy),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Import {
-    Import(Box<[WithAsClause<DottedName>]>),
+    Import(ImportList),
     ImportFrom {
         level: usize,
         module_name: Option<DottedName>,
-        names: Box<[WithAsClause<Name>]>,
+        names: ImportListOrStar,
     },
 }
-impl fmt::Display for Import {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+/// ```
+/// use std::sync::Arc;
+/// use fmt_utils::fmt_to_cleared_string;
+/// use rev_studio_lang_python::{DottedName, Import, ImportList, ImportListOrStar, Name, WithAsClause};
+///
+/// let mut buf = String::new();
+///
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::Import(ImportList(Box::new([WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("foo")))])), as_clause: None}])))), "import foo");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
+///     level: 0,
+///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
+///     names: ImportListOrStar::Star,
+/// }), "from foo import *");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
+///     level: 1,
+///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
+///     names: ImportListOrStar::Star,
+/// }), "from .foo import *");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
+///     level: 2,
+///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
+///     names: ImportListOrStar::Star,
+/// }), "from ..foo import *");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
+///     level: 1,
+///     module_name: None,
+///     names: ImportListOrStar::Star,
+/// }), "from . import *");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
+///     level: 2,
+///     module_name: None,
+///     names: ImportListOrStar::Star,
+/// }), "from .. import *");
+/// ```
+impl fast_fmt::Fmt<fast_fmt::Display> for Import {
+    fn fmt<W: fast_fmt::Write>(
+        &self,
+        writer: &mut W,
+        strategy: &fast_fmt::Display,
+    ) -> Result<(), W::Error> {
         match self {
-            Import(imports),
+            Self::Import(names) => {
+                writer.write_str("import ")?;
+                names.fmt(writer, strategy)?;
+            },
+            Self::ImportFrom {
+                level,
+                module_name: Some(module_name),
+                names,
+            } => {
+                writer.write_str("from ")?;
+                Repeated { value: '.', count: *level }.fmt(writer, strategy)?;
+                module_name.fmt(writer, strategy)?;
+                writer.write_str(" import ")?;
+                names.fmt(writer, strategy)?;
+            },
+            Self::ImportFrom {
+                level,
+                module_name: None,
+                names,
+            } => {
+                writer.write_str("from ")?;
+                Repeated { value: '.', count: *level }.fmt(writer, strategy)?;
+                writer.write_str(" import ")?;
+                names.fmt(writer, strategy)?;
+            },
+        }
+        Ok(())
+    }
+
+    fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
+        match self {
+            Self::Import(names) => 7 + names.size_hint(strategy),
+            Self::ImportFrom {
+                level,
+                module_name: Some(module_name),
+                names,
+            } => 5 + *level + module_name.size_hint(strategy) + 8 + names.size_hint(strategy),
+            Self::ImportFrom {
+                level,
+                module_name: None,
+                names,
+            } => 5 + *level + 8 + names.size_hint(strategy),
         }
     }
 }
