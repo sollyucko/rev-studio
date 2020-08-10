@@ -21,7 +21,7 @@ pub struct Name(pub Arc<String>);
 ///
 /// let mut buf = String::new();
 ///
-/// assert_eq!(fmt_to_cleared_string(&mut buf, Name(Arc::new("a".to_owned()))), "a");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Name(Arc::new("a".to_owned())), &fast_fmt::Display), "a");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for Name {
     fn fmt<W: fast_fmt::Write>(
@@ -49,9 +49,9 @@ pub struct DottedName(pub Box<[Name]>);
 /// let a = Name(Arc::new("a".to_owned()));
 /// let b = Name(Arc::new("b".to_owned()));
 /// let c = Name(Arc::new("c".to_owned()));
-/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone()]))), "a");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone(), b.clone()]))), "a.b");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a, b, c]))), "a.b.c");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone()])), &fast_fmt::Display), "a");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a.clone(), b.clone()])), &fast_fmt::Display), "a.b");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, DottedName(Box::new([a, b, c])), &fast_fmt::Display), "a.b.c");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for DottedName {
     fn fmt<W: fast_fmt::Write>(
@@ -59,23 +59,19 @@ impl fast_fmt::Fmt<fast_fmt::Display> for DottedName {
         writer: &mut W,
         strategy: &fast_fmt::Display,
     ) -> Result<(), W::Error> {
-            Separated {
-                sep: '.',
-                iter: &*self.0,
-            }.fmt(
-            writer,
-            strategy,
-        )
+        Separated {
+            sep: '.',
+            iter: &*self.0,
+        }
+        .fmt(writer, strategy)
     }
 
     fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
-        
-            Separated {
-                sep: '.',
-                iter: &*self.0,
-            }.size_hint(
-            strategy,
-        )
+        Separated {
+            sep: '.',
+            iter: &*self.0,
+        }
+        .size_hint(strategy)
     }
 }
 
@@ -93,8 +89,8 @@ pub struct WithAsClause<T> {
 ///
 /// let a = Name(Arc::new("a".to_owned()));
 /// let b = Name(Arc::new("b".to_owned()));
-/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a.clone(), as_clause: None }), "a");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a, as_clause: Some(b) }), "a as b");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a.clone(), as_clause: None }, &fast_fmt::Display), "a");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, WithAsClause { value: a, as_clause: Some(b) }, &fast_fmt::Display), "a as b");
 /// ```
 impl<T> fast_fmt::Fmt<fast_fmt::Display> for WithAsClause<T>
 where
@@ -191,7 +187,7 @@ pub enum Expression {
     Arc(Arc<Expression>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     LogicalNot,
     Plus,
@@ -205,11 +201,11 @@ pub enum UnaryOp {
 ///
 /// let mut buf = String::new();
 ///
-/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::LogicalNot), "!");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Plus), "+");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Minus), "-");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::BitwiseNot), "~");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Await), "await ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::LogicalNot, &fast_fmt::Display), "!");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Plus, &fast_fmt::Display), "+");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Minus, &fast_fmt::Display), "-");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::BitwiseNot, &fast_fmt::Display), "~");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, UnaryOp::Await, &fast_fmt::Display), "await ");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for UnaryOp {
     fn fmt<W: fast_fmt::Write>(
@@ -217,29 +213,26 @@ impl fast_fmt::Fmt<fast_fmt::Display> for UnaryOp {
         writer: &mut W,
         _strategy: &fast_fmt::Display,
     ) -> Result<(), W::Error> {
-        
-            writer.write_str(match self {
-                Self::LogicalNot => "!",
-                Self::Plus => "+",
-                Self::Minus => "-",
-                Self::BitwiseNot => "~",
-                Self::Await => "await ",
-            }
-        )
+        writer.write_str(self.to_str())
     }
 
     fn size_hint(&self, _strategy: &fast_fmt::Display) -> usize {
-            match self {
-                Self::LogicalNot => "!",
-                Self::Plus => "+",
-                Self::Minus => "-",
-                Self::BitwiseNot => "~",
-                Self::Await => "await ",
-            }.len()
+        self.to_str().len()
+    }
+}
+impl UnaryOp {
+    const fn to_str(self) -> &'static str {
+        match self {
+            Self::LogicalNot => "!",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::BitwiseNot => "~",
+            Self::Await => "await ",
+        }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinaryOp {
     LogicalOr,
     LogicalAnd,
@@ -273,31 +266,31 @@ pub enum BinaryOp {
 ///
 /// let mut buf = String::new();
 ///
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalOr), " or ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalAnd), " and ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Lt), " < ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Le), " <= ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Eq), " == ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ne), " != ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Gt), " > ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ge), " >= ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::In), " in ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::NotIn), " not in ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Is), " is ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::IsNot), " is not ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseOr), " | ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseXor), " ^ ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseAnd), " & ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LeftShift), " << ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::RightShift), " >> ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Add), " + ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Sub), " - ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mul), " * ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::MatMul), " @ ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::TrueDiv), " / ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mod), " % ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::FloorDiv), " // ");
-/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Pow), " ** ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalOr, &fast_fmt::Display), " or ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LogicalAnd, &fast_fmt::Display), " and ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Lt, &fast_fmt::Display), " < ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Le, &fast_fmt::Display), " <= ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Eq, &fast_fmt::Display), " == ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ne, &fast_fmt::Display), " != ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Gt, &fast_fmt::Display), " > ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Ge, &fast_fmt::Display), " >= ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::In, &fast_fmt::Display), " in ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::NotIn, &fast_fmt::Display), " not in ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Is, &fast_fmt::Display), " is ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::IsNot, &fast_fmt::Display), " is not ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseOr, &fast_fmt::Display), " | ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseXor, &fast_fmt::Display), " ^ ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::BitwiseAnd, &fast_fmt::Display), " & ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::LeftShift, &fast_fmt::Display), " << ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::RightShift, &fast_fmt::Display), " >> ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Add, &fast_fmt::Display), " + ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Sub, &fast_fmt::Display), " - ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mul, &fast_fmt::Display), " * ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::MatMul, &fast_fmt::Display), " @ ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::TrueDiv, &fast_fmt::Display), " / ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Mod, &fast_fmt::Display), " % ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::FloorDiv, &fast_fmt::Display), " // ");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, BinaryOp::Pow, &fast_fmt::Display), " ** ");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for BinaryOp {
     fn fmt<W: fast_fmt::Write>(
@@ -305,64 +298,42 @@ impl fast_fmt::Fmt<fast_fmt::Display> for BinaryOp {
         writer: &mut W,
         _strategy: &fast_fmt::Display,
     ) -> Result<(), W::Error> {
-            writer.write_str(match self {
-                Self::LogicalOr => "or",
-                Self::LogicalAnd => "and",
-                Self::Lt => "<",
-                Self::Le => "<=",
-                Self::Eq => "==",
-                Self::Ne => "!=",
-                Self::Gt => ">",
-                Self::Ge => ">=",
-                Self::In => "in",
-                Self::NotIn => "not in",
-                Self::Is => "is",
-                Self::IsNot => "is not",
-                Self::BitwiseOr => "|",
-                Self::BitwiseXor => "^",
-                Self::BitwiseAnd => "&",
-                Self::LeftShift => "<<",
-                Self::RightShift => ">>",
-                Self::Add => "+",
-                Self::Sub => "-",
-                Self::Mul => "*",
-                Self::MatMul => "@",
-                Self::TrueDiv => "/",
-                Self::Mod => "%",
-                Self::FloorDiv => "//",
-                Self::Pow => "**",
-            }
-        )
+        writer.write_str(self.to_str())
     }
 
     fn size_hint(&self, _strategy: &fast_fmt::Display) -> usize {
-            match self {
-                Self::LogicalOr => "or",
-                Self::LogicalAnd => "and",
-                Self::Lt => "<",
-                Self::Le => "<=",
-                Self::Eq => "==",
-                Self::Ne => "!=",
-                Self::Gt => ">",
-                Self::Ge => ">=",
-                Self::In => "in",
-                Self::NotIn => "not in",
-                Self::Is => "is",
-                Self::IsNot => "is not",
-                Self::BitwiseOr => "|",
-                Self::BitwiseXor => "^",
-                Self::BitwiseAnd => "&",
-                Self::LeftShift => "<<",
-                Self::RightShift => ">>",
-                Self::Add => "+",
-                Self::Sub => "-",
-                Self::Mul => "*",
-                Self::MatMul => "@",
-                Self::TrueDiv => "/",
-                Self::Mod => "%",
-                Self::FloorDiv => "//",
-                Self::Pow => "**",
-            }.len()
+        self.to_str().len()
+    }
+}
+impl BinaryOp {
+    const fn to_str(self) -> &'static str {
+        match self {
+            Self::LogicalOr => " or ",
+            Self::LogicalAnd => " and ",
+            Self::Lt => " < ",
+            Self::Le => " <= ",
+            Self::Eq => " == ",
+            Self::Ne => " != ",
+            Self::Gt => " > ",
+            Self::Ge => " >= ",
+            Self::In => " in ",
+            Self::NotIn => " not in ",
+            Self::Is => " is ",
+            Self::IsNot => " is not ",
+            Self::BitwiseOr => " | ",
+            Self::BitwiseXor => " ^ ",
+            Self::BitwiseAnd => " & ",
+            Self::LeftShift => " << ",
+            Self::RightShift => " >> ",
+            Self::Add => " + ",
+            Self::Sub => " - ",
+            Self::Mul => " * ",
+            Self::MatMul => " @ ",
+            Self::TrueDiv => " / ",
+            Self::Mod => " % ",
+            Self::FloorDiv => " // ",
+            Self::Pow => " ** ",
+        }
     }
 }
 
@@ -486,7 +457,7 @@ pub struct ImportList(pub Box<[WithAsClause<DottedName>]>);
 /// assert_eq!(fmt_to_cleared_string(&mut buf, ImportList(Box::new([
 ///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("abc")))])), as_clause: None},
 ///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("de")))])), as_clause: Some(Name(Arc::new(String::from("f"))))},
-/// ]))), "abc, de as f");
+/// ])), &fast_fmt::Display), "abc, de as f");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for ImportList {
     fn fmt<W: fast_fmt::Write>(
@@ -494,22 +465,19 @@ impl fast_fmt::Fmt<fast_fmt::Display> for ImportList {
         writer: &mut W,
         strategy: &fast_fmt::Display,
     ) -> Result<(), W::Error> {
-            Separated {
-                sep: ", ",
-                iter: &*self.0,
-            }.fmt(
-            writer,
-            strategy,
-        )
+        Separated {
+            sep: ", ",
+            iter: &*self.0,
+        }
+        .fmt(writer, strategy)
     }
 
     fn size_hint(&self, strategy: &fast_fmt::Display) -> usize {
-            Separated {
-                sep: ", ",
-                iter: &*self.0,
-            }.size_hint(
-            strategy,
-        )
+        Separated {
+            sep: ", ",
+            iter: &*self.0,
+        }
+        .size_hint(strategy)
     }
 }
 
@@ -525,11 +493,11 @@ pub enum ImportListOrStar {
 ///
 /// let mut buf = String::new();
 ///
-/// assert_eq!(fmt_to_cleared_string(&mut buf, ImportListOrStar::Star), "*");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, ImportListOrStar::Star, &fast_fmt::Display), "*");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, ImportListOrStar::Names(ImportList(Box::new([
 ///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("abc")))])), as_clause: None},
 ///     WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("de")))])), as_clause: Some(Name(Arc::new(String::from("f"))))},
-/// ])))), "abc, de as f");
+/// ]))), &fast_fmt::Display), "abc, de as f");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for ImportListOrStar {
     fn fmt<W: fast_fmt::Write>(
@@ -567,32 +535,32 @@ pub enum Import {
 ///
 /// let mut buf = String::new();
 ///
-/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::Import(ImportList(Box::new([WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("foo")))])), as_clause: None}])))), "import foo");
+/// assert_eq!(fmt_to_cleared_string(&mut buf, Import::Import(ImportList(Box::new([WithAsClause { value: DottedName(Box::new([Name(Arc::new(String::from("foo")))])), as_clause: None}]))), &fast_fmt::Display), "import foo");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
 ///     level: 0,
 ///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
 ///     names: ImportListOrStar::Star,
-/// }), "from foo import *");
+/// }, &fast_fmt::Display), "from foo import *");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
 ///     level: 1,
 ///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
 ///     names: ImportListOrStar::Star,
-/// }), "from .foo import *");
+/// }, &fast_fmt::Display), "from .foo import *");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
 ///     level: 2,
 ///     module_name: Some(DottedName(Box::new([Name(Arc::new(String::from("foo")))]))),
 ///     names: ImportListOrStar::Star,
-/// }), "from ..foo import *");
+/// }, &fast_fmt::Display), "from ..foo import *");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
 ///     level: 1,
 ///     module_name: None,
 ///     names: ImportListOrStar::Star,
-/// }), "from . import *");
+/// }, &fast_fmt::Display), "from . import *");
 /// assert_eq!(fmt_to_cleared_string(&mut buf, Import::ImportFrom {
 ///     level: 2,
 ///     module_name: None,
 ///     names: ImportListOrStar::Star,
-/// }), "from .. import *");
+/// }, &fast_fmt::Display), "from .. import *");
 /// ```
 impl fast_fmt::Fmt<fast_fmt::Display> for Import {
     fn fmt<W: fast_fmt::Write>(
@@ -604,28 +572,36 @@ impl fast_fmt::Fmt<fast_fmt::Display> for Import {
             Self::Import(names) => {
                 writer.write_str("import ")?;
                 names.fmt(writer, strategy)?;
-            },
+            }
             Self::ImportFrom {
                 level,
                 module_name: Some(module_name),
                 names,
             } => {
                 writer.write_str("from ")?;
-                Repeated { value: '.', count: *level }.fmt(writer, strategy)?;
+                Repeated {
+                    value: '.',
+                    count: *level,
+                }
+                .fmt(writer, strategy)?;
                 module_name.fmt(writer, strategy)?;
                 writer.write_str(" import ")?;
                 names.fmt(writer, strategy)?;
-            },
+            }
             Self::ImportFrom {
                 level,
                 module_name: None,
                 names,
             } => {
                 writer.write_str("from ")?;
-                Repeated { value: '.', count: *level }.fmt(writer, strategy)?;
+                Repeated {
+                    value: '.',
+                    count: *level,
+                }
+                .fmt(writer, strategy)?;
                 writer.write_str(" import ")?;
                 names.fmt(writer, strategy)?;
-            },
+            }
         }
         Ok(())
     }
