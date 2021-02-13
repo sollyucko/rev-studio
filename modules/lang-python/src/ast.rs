@@ -656,26 +656,26 @@ pub enum KeywordArgument {
     StarStar(Expression),
 }
 
-// trait WalkExprsMut {
-// /// Call `func` on each node, in order of evaluation
-// fn walk_exprs_mut(&mut self, func: impl FnMut(&mut Expression));
-// }
+trait WalkExprsMutRev {
+    fn walk_exprs_mut_rev(&mut self) -> Box<dyn Iterator<Item = &mut Expression>>;
+}
 
-// impl WalkExprsMut for Expression {
-// fn walk_exprs_mut(&mut self, func: impl FnMut(&mut Expression)) {
-// // Allow generics + capture
-// macro_rules! v {
-// ($($ident:ident),*) => {
-// { $($ident.walk_exprs_mut(func);)* }
-// }
-// }
+impl WalkExprsMutRev for Expression {
+    
+    
+    fn walk_exprs_mut_rev(&mut self) {
+        // Allow generics + capture
+        macro_rules! v {
+            ($($ident:ident),*) => {
+                { $($ident.walk_exprs_mut(func);)* }
+            }
+        }
 
-// match self {
-// Self::Assignment(a, b) => v!(b, a),
-// Self::IfElse(a, b, c) => todo!(),
-
-// _ => todo!(),
-// }
-// func(self)
-// }
-// }
+        match self {
+            Self::Assignment(a, b) => Box::new(a.walk_exprs_mut_rev().chain(b.walk_exprs_mut_rev()),
+            Self::IfElse(a, b, c) => todo!(),
+            _ => todo!(),
+        }
+        func(self)
+    }
+}

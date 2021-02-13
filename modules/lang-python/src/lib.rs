@@ -8,6 +8,7 @@ pub mod ast;
 pub use self::ast::*;
 
 use arrayvec::{Array, ArrayVec};
+use itertools::Itertools;
 use rev_studio_arch_pvm::Instruction;
 use std::array;
 use std::cmp::Ordering;
@@ -277,6 +278,19 @@ pub fn convert_instructions_to_ast(instructions: &[Instruction], consts: &[Expre
 pub fn simplify(suite: &mut Suite) {
     let vec = std::mem::take(&mut suite.0).into_vec();
     let suite_ref = &suite; // prevent accidental mutation, pt. 1
+
+    for i in (0..vec.len()).rev() {
+        // iterate over children of vec[i] in reverse order-of-operations
+        // if an Arc is found:
+        //     if it has a refcount of 1, remove it
+        //     otherwise, make sure it is the same as vec[i-1], remove vec[i-1]
+        //         if it now has a refcount of 1, remove it
+        //         otherwise check vec[i-2], etc.
+
+        match vec[i] {}
+
+        for j in (0..i).rev() {}
+    }
 
     let _suite_ref_2 = suite_ref; // prevent accidental mutation, pt. 2
     suite.0 = vec.into_boxed_slice();
