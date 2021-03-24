@@ -35,6 +35,7 @@ pub enum Expr {
     Immediate(NumBits, u64),
     Reg(Reg),
     Msr(Box<Expr>),
+    Xcr(u32),
     Pmc(u32),
     Ptr(NumBits, Box<Expr>),
     Trunc(NumBits, Box<Expr>),
@@ -65,10 +66,12 @@ pub enum Expr {
 pub enum Dest {
     Reg(Reg),
     Msr(Box<Expr>),
+    Xcr(u32),
     Ptr(NumBits, Box<Expr>),
     Concat(Box<Dest>, Box<Dest>),
 }
 
+#[rustfmt::skip]
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[non_exhaustive]
@@ -105,13 +108,13 @@ pub enum Reg {
     // note: MSRs and APIC registers not included
 }
 
+#[rustfmt::skip]
 impl Reg {
     pub const SPB: Self = Self::SPL; pub const BPB: Self = Self::BPL; pub const SIB: Self = Self::SIL; pub const DIB: Self = Self::DIL;
 
     pub const ST: Self = Self::ST0;
     pub const TPR: Self = Self::CR8;
     pub const TASK: Self = Self::TR; // FIXME: is this correct?
-    pub const XFEATURE_ENABLED_MASK: Self = Self::XCR0;
 
     pub const X87CONTROL: Self = Self::FCW;
     pub const X87STATUS: Self = Self::FSW;
@@ -167,6 +170,7 @@ impl Reg {
 }
 
 /// Registers with the same RegSpace can potentially overlap
+#[rustfmt::skip]
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[non_exhaustive]
@@ -189,16 +193,30 @@ pub enum RegSpace {
     XINUSE, XMODIFIED, XRSTOR_INFO, XCOMP_BV,
 }
 
+#[rustfmt::skip]
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum RegType {
-    U8, U16, U32, U64, Bitfield, Flag, PrivLvl, Ptr16, Ptr32, Ptr64, Seg, Float, FloatStackTop, FpuOp, V128, V256, V512, VecMask, Tile, TableReg, Bounds,
+    U8, U16, U32, U64,
+    Bitfield,
+    Flag,
+    PrivLvl,
+    Ptr16, Ptr32, Ptr64,
+    Seg,
+    Float,
+    FloatStackTop,
+    FpuOp,
+    V128, V256, V512,
+    VecMask,
+    Tile,
+    TableReg,
+    Bounds,
 }
 
 pub enum CpuMode {
     Real,
-    Unreal, // Real mode with 32-bit selectors
-    SystemManagement, // 32-bit
+    Unreal,
+    SystemManagement,
     Virtual8086_16,
     Virtual8086_32,
     Protected16,
@@ -207,7 +225,6 @@ pub enum CpuMode {
     Long32,
     Long64,
 }
-
 
 impl Reg {
     pub fn size(&self) -> NumBits {
