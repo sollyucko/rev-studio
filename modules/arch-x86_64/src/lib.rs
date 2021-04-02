@@ -237,7 +237,7 @@ impl Reg {
     #[rustfmt::skip]
     pub fn size(&self) -> NumBits {
         use Reg::*;
-        
+
         match self {
             CF | PF | AF | ZF | SF | TF | IF | DF | OF | NT | RF | VM | AC | VIF | VIP | ID
              | C0 | C1 | C2 | C3
