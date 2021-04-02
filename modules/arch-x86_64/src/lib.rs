@@ -35,14 +35,15 @@ pub enum Expr {
     Immediate(NumBits, u64),
     Reg(Reg),
     Msr(Box<Expr>),
-    Xcr(u32),
-    Pmc(u32),
+    Xcr(Box<Expr>),
+    /// performance-monitoring counter
+    Pmc(Box<Expr>),
     Ptr(NumBits, Box<Expr>),
     Trunc(NumBits, Box<Expr>),
     Zext(NumBits, Box<Expr>),
     Sext(NumBits, Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
-    // The NumBits is the chunk size, e.g. 1 for a bit reversal or 8 for a standard-size-byte reversal
+    /// The NumBits is the chunk size, e.g. 1 for a bit reversal or 8 for a standard-size-byte reversal
     Reverse(Box<Expr>, NumBits),
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
