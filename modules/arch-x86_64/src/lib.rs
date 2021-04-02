@@ -66,7 +66,7 @@ pub enum Expr {
 pub enum Dest {
     Reg(Reg),
     Msr(Box<Expr>),
-    Xcr(u32),
+    Xcr(Box<Expr>),
     Ptr(NumBits, Box<Expr>),
     Concat(Box<Dest>, Box<Dest>),
 }
@@ -86,7 +86,7 @@ pub enum Reg {
     ES, CS, SS, DS, FS, GS,
     ST0, ST1, ST2, ST3, ST4, ST5, ST6, ST7,
     FSW, TOP, C0, C1, C2, C3, FCW, FTW,
-    FIP, FDP, FCS, FDS, FOP,
+    FIP32, FIP64, FDP32, FDP64, FCS, FDS, FOP,
     FPR0, FPR1, FPR2, FPR3, FPR4, FPR5, FPR6, FPR7,
     MMX0, MMX1, MMX2, MMX3, MMX4, MMX5, MMX6, MMX7,
     XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15,
@@ -96,14 +96,18 @@ pub enum Reg {
     ZMM0, ZMM1, ZMM2, ZMM3, ZMM4, ZMM5, ZMM6, ZMM7, ZMM8, ZMM9, ZMM10, ZMM11, ZMM12, ZMM13, ZMM14, ZMM15,
     ZMM16, ZMM17, ZMM18, ZMM19, ZMM20, ZMM21, ZMM22, ZMM23, ZMM24, ZMM25, ZMM26, ZMM27, ZMM28, ZMM29, ZMM30, ZMM31,
     K0, K1, K2, K3, K4, K5, K6, K7, MXCSR, MXCSR_MASK,
-    MSW, CR0, CR1, CR2, CR3, CR4, CR5, CR6, CR7, CR8, CR9, CR10, CR11, CR12, CR13, CR14, CR15,
-    DR0, DR1, DR2, DR3, DR4, DR5, DR6, DR7, DR8, DR9, DR10, DR11, DR12, DR13, DR14, DR15,
+    MSW,
+    CR0_32, CR1_32, CR2_32, CR3_32, CR4_32, CR5_32, CR6_32, CR7_32,
+    CR0_64, CR1_64, CR2_64, CR3_64, CR4_64, CR5_64, CR6_64, CR7_64, CR8_64, CR9_64, CR10_64, CR11_64, CR12_64, CR13_64, CR14_64, CR15_64,
+    DR0_32, DR1_32, DR2_32, DR3_32, DR4_32, DR5_32, DR6_32, DR7_32,
+    DR0_64, DR1_64, DR2_64, DR3_64, DR4_64, DR5_64, DR6_64, DR7_64, DR8_64, DR9_64, DR10_64, DR11_64, DR12_64, DR13_64, DR14_64, DR15_64,
     TR0, TR1, TR2, TR3, TR4, TR5, TR6, TR7,
     TMM0, TMM1, TMM2, TMM3, TMM4, TMM5, TMM6, TMM7,
-    GDTR, LDTR, IDTR, TR,
+    GDTR_32_16, GDTR_64_16, IDTR_32_16, IDTR_64_16,
+    LDTR_SELECTOR, LDTR_DESCRIPTOR, TR_SELECTOR, TR_DESCRIPTOR,
     BND0, BND1, BND2, BND3, BNDCFG, BNDSTATUS,
-    SSP, PKRU, UIF,
-    XINUSE, XMODIFIED, XRSTOR_INFO, XCOMP_BV,
+    SSP32, SSP64, PKRU, UIF,
+    XINUSE, XMODIFIED, XRSTOR_INFO_CPL, XRSTOR_INFO_VMXNR, XRSTOR_INFO_LAXA_32, XRSTOR_INFO_LAXA_64, XRSTOR_INFO_COMPMASK,
 
     // note: MSRs and APIC registers not included
 }
@@ -113,17 +117,18 @@ impl Reg {
     pub const SPB: Self = Self::SPL; pub const BPB: Self = Self::BPL; pub const SIB: Self = Self::SIL; pub const DIB: Self = Self::DIL;
 
     pub const ST: Self = Self::ST0;
-    pub const TPR: Self = Self::CR8;
-    pub const TASK: Self = Self::TR; // FIXME: is this correct?
+    pub const TPR: Self = Self::CR8_64;
 
     pub const X87CONTROL: Self = Self::FCW;
     pub const X87STATUS: Self = Self::FSW;
     pub const X87TAG: Self = Self::FTW;
     pub const FPSW: Self = Self::FSW;
 
-    pub const FP_DP: Self = Self::FDP;
+    pub const FP_DP_32: Self = Self::FDP32;
+    pub const FP_DP_64: Self = Self::FDP64;
     pub const FP_DS: Self = Self::FDS;
-    pub const FP_IP: Self = Self::FIP;
+    pub const FP_IP_32: Self = Self::FIP32;
+    pub const FP_IP_64: Self = Self::FIP64;
     pub const FP_CS: Self = Self::FCS;
     pub const FP_OPC: Self = Self::FOP;
 
@@ -163,10 +168,13 @@ impl Reg {
     pub const R8L: Self = Self::R8B; pub const R9L: Self = Self::R9B; pub const R10L: Self = Self::R10B; pub const R11L: Self = Self::R11B;
     pub const R12L: Self = Self::R12B; pub const R13L: Self = Self::R13B; pub const R14L: Self = Self::R14B; pub const R15L: Self = Self::R15B;
 
-    pub const DB0: Self = Self::DR0; pub const DB1: Self = Self::DR1; pub const DB2: Self = Self::DR2; pub const DB3: Self = Self::DR3;
-    pub const DB4: Self = Self::DR4; pub const DB5: Self = Self::DR5; pub const DB6: Self = Self::DR6; pub const DB7: Self = Self::DR7;
-    pub const DB8: Self = Self::DR8; pub const DB9: Self = Self::DR9; pub const DB10: Self = Self::DR10; pub const DB11: Self = Self::DR11;
-    pub const DB12: Self = Self::DR12; pub const DB13: Self = Self::DR13; pub const DB14: Self = Self::DR14; pub const DB15: Self = Self::DR15;
+    pub const DB0_32: Self = Self::DR0_32; pub const DB1_32: Self = Self::DR1_32; pub const DB2_32: Self = Self::DR2_32; pub const DB3_32: Self = Self::DR3_32;
+    pub const DB4_32: Self = Self::DR4_32; pub const DB5_32: Self = Self::DR5_32; pub const DB6_32: Self = Self::DR6_32; pub const DB7_32: Self = Self::DR7_32;
+
+    pub const DB0_64: Self = Self::DR0_64; pub const DB1_64: Self = Self::DR1_64; pub const DB2_64: Self = Self::DR2_64; pub const DB3_64: Self = Self::DR3_64;
+    pub const DB4_64: Self = Self::DR4_64; pub const DB5_64: Self = Self::DR5_64; pub const DB6_64: Self = Self::DR6_64; pub const DB7_64: Self = Self::DR7_64;
+    pub const DB8_64: Self = Self::DR8_64; pub const DB9_64: Self = Self::DR9_64; pub const DB10_64: Self = Self::DR10_64; pub const DB11_64: Self = Self::DR11_64;
+    pub const DB12_64: Self = Self::DR12_64; pub const DB13_64: Self = Self::DR13_64; pub const DB14_64: Self = Self::DR14_64; pub const DB15_64: Self = Self::DR15_64;
 }
 
 /// Registers with the same RegSpace can potentially overlap
@@ -187,30 +195,29 @@ pub enum RegSpace {
     DR0, DR1, DR2, DR3, DR4, DR5, DR6, DR7, DR8, DR9, DR10, DR11, DR12, DR13, DR14, DR15,
     TR0, TR1, TR2, TR3, TR4, TR5, TR6, TR7,
     TMM0, TMM1, TMM2, TMM3, TMM4, TMM5, TMM6, TMM7,
-    GDTR, LDTR, IDTR, TR,
+    GDTR, IDTR, LDTR_SELECTOR, LDTR_DESCRIPTOR, TR_SELECTOR, TR_DESCRIPTOR,
     BND0, BND1, BND2, BND3, BNDCFG, BNDSTATUS,
     SSP, PKRU, UIF,
-    XINUSE, XMODIFIED, XRSTOR_INFO, XCOMP_BV,
+    XINUSE, XMODIFIED, XRSTOR_INFO_CPL, XRSTOR_INFO_VMXNR, XRSTOR_INFO_LAXA, XRSTOR_INFO_COMPMASK,
 }
 
 #[rustfmt::skip]
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum RegType {
-    U8, U16, U32, U64,
+    Integer,
     Bitfield,
     Flag,
-    PrivLvl,
-    Ptr16, Ptr32, Ptr64,
+    Pointer,
     Seg,
     Float,
-    FloatStackTop,
     FpuOp,
-    V128, V256, V512,
+    Vector,
     VecMask,
     Tile,
     TableReg,
     Bounds,
+    Reserved,
 }
 
 pub enum CpuMode {
@@ -227,8 +234,75 @@ pub enum CpuMode {
 }
 
 impl Reg {
+    #[rustfmt::skip]
     pub fn size(&self) -> NumBits {
-        todo!()
+        use Reg::*;
+        
+        match self {
+            CF | PF | AF | ZF | SF | TF | IF | DF | OF | NT | RF | VM | AC | VIF | VIP | ID
+             | C0 | C1 | C2 | C3
+             | UIF | XRSTOR_INFO_VMXNR
+             => NumBits(1),
+            IOPL | XRSTOR_INFO_CPL
+             => NumBits(2),
+            TOP
+             => NumBits(3),
+            AL | CL | DL | BL | SPL | BPL | SIL | DIL
+             | R8B | R9B | R10B | R11B | R12B | R13B | R14B | R15B
+             | AH | CH | DH | BH
+             => NumBits(8),
+            FOP
+             => NumBits(11),
+            AX | CX | DX | BX | SP | BP | SI | DI
+             | R8W | R9W | R10W | R11W | R12W | R13W | R14W | R15W
+             | FLAGS | IP
+             | ES | CS | SS | DS | FS | GS
+             | FSW | FCW | FTW
+             | FCS | FDS
+             | MXCSR | MXCSR_MASK
+             | MSW
+             | LDTR_SELECTOR | TR_SELECTOR
+             => NumBits(16),
+            EAX | ECX | EDX | EBX | ESP | EBP | ESI | EDI
+             | R8D | R9D | R10D | R11D | R12D | R13D | R14D | R15D
+             | EFLAGS | EIP | FIP32 | FDP32
+             | CR0_32 | CR1_32 | CR2_32 | CR3_32 | CR4_32 | CR5_32 | CR6_32 | CR7_32
+             | DR0_32 | DR1_32 | DR2_32 | DR3_32 | DR4_32 | DR5_32 | DR6_32 | DR7_32
+             | TR0 | TR1 | TR2 | TR3 | TR4 | TR5 | TR6 | TR7
+             | SSP32 | PKRU | XRSTOR_INFO_LAXA_32
+             => NumBits(32),
+            GDTR_32_16 | IDTR_32_16
+             => NumBits(48),
+            RAX | RCX | RDX | RBX | RSP | RBP | RSI | RDI
+             | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
+             | RFLAGS | RIP | FIP64 | FDP64
+             | MMX0 | MMX1 | MMX2 | MMX3 | MMX4 | MMX5 | MMX6 | MMX7
+             | K0 | K1 | K2 | K3 | K4 | K5 | K6 | K7
+             | CR0_64 | CR1_64 | CR2_64 | CR3_64 | CR4_64 | CR5_64 | CR6_64 | CR7_64
+             | CR8_64 | CR9_64 | CR10_64 | CR11_64 | CR12_64 | CR13_64 | CR14_64 | CR15_64
+             | DR0_64 | DR1_64 | DR2_64 | DR3_64 | DR4_64 | DR5_64 | DR6_64 | DR7_64
+             | DR8_64 | DR9_64 | DR10_64 | DR11_64 | DR12_64 | DR13_64 | DR14_64 | DR15_64
+             | LDTR_DESCRIPTOR | TR_DESCRIPTOR
+             | BNDCFG | BNDSTATUS | SSP64
+             | XINUSE | XMODIFIED | XRSTOR_INFO_LAXA_64 | XRSTOR_INFO_COMPMASK
+             => NumBits(64),
+            ST0 | ST1 | ST2 | ST3 | ST4 | ST5 | ST6 | ST7
+             | FPR0 | FPR1 | FPR2 | FPR3 | FPR4 | FPR5 | FPR6 | FPR7
+             | GDTR_64_16 | IDTR_64_16
+             => NumBits(80),
+            XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7 | XMM8 | XMM9 | XMM10 | XMM11 | XMM12 | XMM13 | XMM14 | XMM15
+             | XMM16 | XMM17 | XMM18 | XMM19 | XMM20 | XMM21 | XMM22 | XMM23 | XMM24 | XMM25 | XMM26 | XMM27 | XMM28 | XMM29 | XMM30 | XMM31
+             | BND0 | BND1 | BND2 | BND3
+             => NumBits(128),
+            YMM0 | YMM1 | YMM2 | YMM3 | YMM4 | YMM5 | YMM6 | YMM7 | YMM8 | YMM9 | YMM10 | YMM11 | YMM12 | YMM13 | YMM14 | YMM15
+             | YMM16 | YMM17 | YMM18 | YMM19 | YMM20 | YMM21 | YMM22 | YMM23 | YMM24 | YMM25 | YMM26 | YMM27 | YMM28 | YMM29 | YMM30 | YMM31
+             => NumBits(256),
+            ZMM0 | ZMM1 | ZMM2 | ZMM3 | ZMM4 | ZMM5 | ZMM6 | ZMM7 | ZMM8 | ZMM9 | ZMM10 | ZMM11 | ZMM12 | ZMM13 | ZMM14 | ZMM15
+             | ZMM16 | ZMM17 | ZMM18 | ZMM19 | ZMM20 | ZMM21 | ZMM22 | ZMM23 | ZMM24 | ZMM25 | ZMM26 | ZMM27 | ZMM28 | ZMM29 | ZMM30 | ZMM31
+             => NumBits(512),
+            TMM0 | TMM1 | TMM2 | TMM3 | TMM4 | TMM5 | TMM6 | TMM7
+             => NumBits(8192),
+        }
     }
 }
 
@@ -249,6 +323,7 @@ impl Expr {
             | Self::TruncDiv(size, _, _)
             | Self::TruncMod(size, _, _) => Some(*size),
             Self::Reg(reg) => Some(reg.size()),
+            Self::Msr(_) | Self::Xcr(_) | Self::Pmc(_) => Some(NumBits(64)),
             Self::Concat(lhs, rhs) => Option::zip(lhs.size(), rhs.size()).map(|(x, y)| x + y),
             Self::Reverse(expr, chunk_size) => expr.size().map(|size| {
                     assert_eq!(
