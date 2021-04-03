@@ -22,6 +22,10 @@ impl Rem<&NumBits> for NumBits {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct NumBytes(u8);
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Statement {
@@ -33,7 +37,7 @@ pub enum Statement {
 pub enum Expr {
     Undefined,
     Immediate(NumBits, u64),
-    Reg(Reg),
+    Register(Register),
     Msr(Box<Expr>),
     Xcr(Box<Expr>),
     /// performance-monitoring counter
@@ -65,7 +69,7 @@ pub enum Expr {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Dest {
-    Reg(Reg),
+    Register(Register),
     Msr(Box<Expr>),
     Xcr(Box<Expr>),
     Ptr(NumBits, Box<Expr>),
@@ -76,7 +80,7 @@ pub enum Dest {
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum Reg {
+pub enum Register {
     AL, CL, DL, BL, SPL, BPL, SIL, DIL, R8B, R9B, R10B, R11B, R12B, R13B, R14B, R15B,
     AH, CH, DH, BH,
     AX, CX, DX, BX, SP, BP, SI, DI, R8W, R9W, R10W, R11W, R12W, R13W, R14W, R15W,
@@ -114,7 +118,7 @@ pub enum Reg {
 }
 
 #[rustfmt::skip]
-impl Reg {
+impl Register {
     pub const SPB: Self = Self::SPL; pub const BPB: Self = Self::BPL; pub const SIB: Self = Self::SIL; pub const DIB: Self = Self::DIL;
 
     pub const ST: Self = Self::ST0;
@@ -234,10 +238,10 @@ pub enum CpuMode {
     Long64,
 }
 
-impl Reg {
+impl Register {
     #[rustfmt::skip]
     pub fn size(&self) -> NumBits {
-        use Reg::*;
+        use Register::*;
 
         match self {
             CF | PF | AF | ZF | SF | TF | IF | DF | OF | NT | RF | VM | AC | VIF | VIP | ID
@@ -323,7 +327,7 @@ impl Expr {
             | Self::UnsignedMod(size, _, _)
             | Self::TruncDiv(size, _, _)
             | Self::TruncMod(size, _, _) => Some(*size),
-            Self::Reg(reg) => Some(reg.size()),
+            Self::Register(reg) => Some(reg.size()),
             Self::Msr(_) | Self::Xcr(_) | Self::Pmc(_) => Some(NumBits(64)),
             Self::Concat(lhs, rhs) => Option::zip(lhs.size(), rhs.size()).map(|(x, y)| x + y),
             Self::Reverse(expr, chunk_size) => expr.size().map(|size| {
@@ -352,10 +356,125 @@ impl Expr {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+enum OperandSize {
+    OpSize16,
+    OpSize32,
+    OpSize64,
+}
+
+enum RmMem {
+    OffsetOnly,
+    Scale0(Register),
+    Scale1(Register, Register),
+    Scale2 { base: Register, index: Register },
+    Scale4 { base: Register, index: Register },
+    Scale8 { base: Register, index: Register },
+}
+
+fn parse_x86_instruction(bytes: impl Iterator<Item = u8>) -> Instruction {
+    match bytes.next().unwrap() {}
+}
+
+// TODO: finish
+// TODO: segments
+fn parse_modrm(
+    bytes: impl Iterator<Item = u8>,
+    mode: CpuMode,
+    operand_size: OperandSize,
+    flags: InstructionFlags,
+) -> ModRM {
+    use OperandSize::*;
+    use Register::*;
+    use RmMem::*;
+
+    let byte = bytes.next().unwrap();
+
+    let mod_raw = byte >> 6;
+    let reg_raw = (byte >> 3) & 0b111;
+    let rm_raw = byte & 0b111;
+
+    let reg = get_gpr(reg_raw, rex.r, operand_size);
+    let rm = if mod_raw == 0b11 {
+        get_gpr(rm_raw, flags.b, operand_size.bits())
+    } else {
+        let (rm_regs, disp_size) = if operand_size == OpSize16 {
+            (
+                match rm_raw {
+                    0b000 => Scale1(BX, SI),
+                    0b001 => Scale1(BX, DI),
+                    0b010 => Scale1(BP, SI),
+                    0b011 => Scale1(BP, DI),
+                    0b100 => Scale0(SI),
+                    0b101 => Scale0(DI),
+                    0b110 => {
+                        if mod_raw == 0b00 {
+                            OffsetOnly
+                        } else {
+                            Scale0(BP)
+                        }
+                    }
+                    0b111 => Scale0(BX),
+                    _ => unreachable!(),
+                },
+                match mod_raw {
+                    0b00 => {
+                        if rm_raw == 6 {
+                            NumBytes(2)
+                        } else {
+                            NumBytes(0)
+                        }
+                    }
+                    0b01 => NumBytes(1),
+                    0b10 => NumBytes(2),
+                    _ => unreachable!(),
+                },
+            )
+        } else {
+            let default_offset_size = match mod_raw {
+                0b00 => NumBytes(0),
+                0b01 => NumBytes(1),
+                0b10 => NumBytes(4),
+                _ => unreachable!(),
+            };
+            match rm_raw {
+                0b100 => {
+                    let sib_byte = bytes.next().unwrap();
+
+                    let scale_raw = sib_byte >> 6;
+                    let index_raw = (sib_byte >> 3) & 0b111;
+                    let base_raw = sib_byte & 0b111;
+
+                    match (mod_raw, (flags.x.unwrap_or(false), index_raw), base_raw) {
+                        (0b00, (false, 0b100), 0b101) => (OffsetOnly, NumBytes(4)),
+                        (0b00, _, 0b101) => {
+                            (RmMem::from_scale_index(scale_raw, index_raw), NumBytes(4))
+                        }
+                        (_, (false, 0b100), _) => (
+                            Scale0(get_gpr(base_raw, flags.b, operand_size.bits())),
+                            default_offset_size,
+                        ),
+                        _ => (
+                            RmMem::from_scale_index_base(scale_raw, index_raw, base_raw),
+                            default_offset_size,
+                        ),
+                    }
+                }
+                0b101 if mod_raw == 0b00 => {
+                    if mode == CpuMode::Long64 {
+                        match operand_size {
+                            OpSize32 => (Scale0(EIP), NumBytes(4)),
+                            OpSize64 => (Scale0(RIP), NumBytes(4)),
+                        }
+                    } else {
+                        (DispOnly, NumBytes(4))
+                    }
+                }
+                _ => (
+                    Scale0(get_gpr(rm_raw, flags.b, operand_size)),
+                    default_offset_size,
+                ),
+            }
+        };
+    };
+    ModRM { reg, rm }
 }
