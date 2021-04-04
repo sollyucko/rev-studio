@@ -1,3 +1,5 @@
+// TODO: decide pub vs non-pub
+
 use std::ops::{Add, Rem};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +208,12 @@ pub enum RegSpace {
     XINUSE, XMODIFIED, XRSTOR_INFO_CPL, XRSTOR_INFO_VMXNR, XRSTOR_INFO_LAXA, XRSTOR_INFO_COMPMASK,
 }
 
+impl RegSpace {
+    pub fn with_size(self, _size: NumBits) -> Option<Register> {
+        todo!() // TODO
+    }
+}
+
 #[rustfmt::skip]
 #[derive(Debug)]
 #[non_exhaustive]
@@ -223,19 +231,6 @@ pub enum RegType {
     TableReg,
     Bounds,
     Reserved,
-}
-
-pub enum CpuMode {
-    Real,
-    Unreal,
-    SystemManagement,
-    Virtual8086_16,
-    Virtual8086_32,
-    Protected16,
-    Protected32,
-    Long16,
-    Long32,
-    Long64,
 }
 
 impl Register {
@@ -356,36 +351,143 @@ impl Expr {
     }
 }
 
-enum OperandSize {
-    OpSize16,
-    OpSize32,
-    OpSize64,
+// XXX: this assumes that non-REX prefixes also imply no *H registers, and that all the flags are Some or None symultaneously
+pub fn get_gpr(low_3_bits: u8, high_bit: Option<bool>, size: NumBits) -> Register {
+    let space = match (low_3_bits, high_bit, size) {
+        (0b100, None, NumBits(8)) => return Register::AH,
+        (0b101, None, NumBits(8)) => return Register::CH,
+        (0b110, None, NumBits(8)) => return Register::DH,
+        (0b111, None, NumBits(8)) => return Register::BH,
+        (0b000, Some(true), _) => RegSpace::R8,
+        (0b001, Some(true), _) => RegSpace::R9,
+        (0b010, Some(true), _) => RegSpace::R10,
+        (0b011, Some(true), _) => RegSpace::R11,
+        (0b100, Some(true), _) => RegSpace::R12,
+        (0b101, Some(true), _) => RegSpace::R13,
+        (0b110, Some(true), _) => RegSpace::R14,
+        (0b111, Some(true), _) => RegSpace::R15,
+        (0b000, _, _) => RegSpace::AX,
+        (0b001, _, _) => RegSpace::CX,
+        (0b010, _, _) => RegSpace::DX,
+        (0b011, _, _) => RegSpace::BX,
+        (0b100, _, _) => RegSpace::SP,
+        (0b101, _, _) => RegSpace::BP,
+        (0b110, _, _) => RegSpace::SI,
+        (0b111, _, _) => RegSpace::DI,
+        _ => unreachable!(),
+    };
+    space.with_size(size).unwrap()
 }
 
-enum RmMem {
-    OffsetOnly,
-    Scale0(Register),
+#[non_exhaustive]
+pub enum Instruction {
+    // TODO
+}
+
+pub struct InstructionFlags {
+    w: Option<bool>,
+    r: Option<bool>,
+    x: Option<bool>,
+    b: Option<bool>,
+    l: Option<bool>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum CpuMode {
+    Real,
+    Unreal,
+    SystemManagement,
+    Virtual8086_16,
+    Virtual8086_32,
+    Protected16,
+    Protected32,
+    Long16,
+    Long32,
+    Long64,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum OperandOrAddressSize {
+    Size16,
+    Size32,
+    Size64,
+}
+
+impl OperandOrAddressSize {
+    pub fn bits(self) -> NumBits {
+        match self {
+            Self::Size16 => NumBits(16),
+            Self::Size32 => NumBits(32),
+            Self::Size64 => NumBits(64),
+        }
+    }
+
+    pub fn bytes(self) -> NumBytes {
+        match self {
+            Self::Size16 => NumBytes(2),
+            Self::Size32 => NumBytes(4),
+            Self::Size64 => NumBytes(8),
+        }
+    }
+}
+
+pub enum RmMemRegs {
+    DispOnly,
+    SingleReg(Register),
+    /// order doesn't matter
     Scale1(Register, Register),
-    Scale2 { base: Register, index: Register },
-    Scale4 { base: Register, index: Register },
-    Scale8 { base: Register, index: Register },
+    Scale2 { base: Option<Register>, index: Register },
+    Scale4 { base: Option<Register>, index: Register },
+    Scale8 { base: Option<Register>, index: Register },
 }
 
-fn parse_x86_instruction(bytes: impl Iterator<Item = u8>) -> Instruction {
-    match bytes.next().unwrap() {}
+impl RmMemRegs {
+    pub fn from_scale_index(scale_raw: u8, index: Register) -> Self {
+        match scale_raw {
+            0 => Self::SingleReg(index),
+            1 => Self::Scale2 { base: None, index },
+            2 => Self::Scale4 { base: None, index },
+            3 => Self::Scale8 { base: None, index },
+            _ => panic!("Invalid scale_raw: {}", scale_raw),
+        }
+    }
+
+    pub fn from_scale_index_base(scale_raw: u8, index: Register, base: Register) -> Self {
+        match scale_raw {
+            0 => Self::Scale1(base, index),
+            1 => Self::Scale2 { base: Some(base), index },
+            2 => Self::Scale4 { base: Some(base), index },
+            3 => Self::Scale8 { base: Some(base), index },
+            _ => panic!("Invalid scale_raw: {}", scale_raw),
+        }
+    }
 }
 
-// TODO: finish
+pub enum Rm {
+    Register(Register),
+    Mem(NumBytes, RmMemRegs, i32),
+}
+
+pub struct ModRM {
+    reg: Register,
+    rm: Rm,
+}
+
+pub fn parse_x86_instruction(_bytes: impl Iterator<Item = u8>) -> Instruction {
+    todo!() // match bytes.next().unwrap() {}
+}
+
 // TODO: segments
-fn parse_modrm(
-    bytes: impl Iterator<Item = u8>,
+pub fn parse_modrm(
+    mut bytes: impl Iterator<Item = u8>,
     mode: CpuMode,
-    operand_size: OperandSize,
+    operand_size: OperandOrAddressSize,
+    address_size: OperandOrAddressSize,
     flags: InstructionFlags,
 ) -> ModRM {
-    use OperandSize::*;
+    use OperandOrAddressSize::*;
     use Register::*;
-    use RmMem::*;
+    use RmMemRegs::*;
 
     let byte = bytes.next().unwrap();
 
@@ -393,27 +495,27 @@ fn parse_modrm(
     let reg_raw = (byte >> 3) & 0b111;
     let rm_raw = byte & 0b111;
 
-    let reg = get_gpr(reg_raw, rex.r, operand_size);
+    let reg = get_gpr(reg_raw, flags.r, operand_size.bits());
     let rm = if mod_raw == 0b11 {
-        get_gpr(rm_raw, flags.b, operand_size.bits())
+        Rm::Register(get_gpr(rm_raw, flags.b, operand_size.bits()))
     } else {
-        let (rm_regs, disp_size) = if operand_size == OpSize16 {
+        let (rm_regs, disp_size) = if address_size == Size16 {
             (
                 match rm_raw {
                     0b000 => Scale1(BX, SI),
                     0b001 => Scale1(BX, DI),
                     0b010 => Scale1(BP, SI),
                     0b011 => Scale1(BP, DI),
-                    0b100 => Scale0(SI),
-                    0b101 => Scale0(DI),
+                    0b100 => SingleReg(SI),
+                    0b101 => SingleReg(DI),
                     0b110 => {
                         if mod_raw == 0b00 {
-                            OffsetOnly
+                            DispOnly
                         } else {
-                            Scale0(BP)
+                            SingleReg(BP)
                         }
                     }
-                    0b111 => Scale0(BX),
+                    0b111 => SingleReg(BX),
                     _ => unreachable!(),
                 },
                 match mod_raw {
@@ -430,7 +532,7 @@ fn parse_modrm(
                 },
             )
         } else {
-            let default_offset_size = match mod_raw {
+            let default_disp_size = match mod_raw {
                 0b00 => NumBytes(0),
                 0b01 => NumBytes(1),
                 0b10 => NumBytes(4),
@@ -445,36 +547,45 @@ fn parse_modrm(
                     let base_raw = sib_byte & 0b111;
 
                     match (mod_raw, (flags.x.unwrap_or(false), index_raw), base_raw) {
-                        (0b00, (false, 0b100), 0b101) => (OffsetOnly, NumBytes(4)),
+                        (0b00, (false, 0b100), 0b101) => (DispOnly, NumBytes(4)),
                         (0b00, _, 0b101) => {
-                            (RmMem::from_scale_index(scale_raw, index_raw), NumBytes(4))
+                            (RmMemRegs::from_scale_index(scale_raw, get_gpr(index_raw, flags.x, address_size.bits())), NumBytes(4))
                         }
                         (_, (false, 0b100), _) => (
-                            Scale0(get_gpr(base_raw, flags.b, operand_size.bits())),
-                            default_offset_size,
+                            SingleReg(get_gpr(base_raw, flags.b, address_size.bits())),
+                            default_disp_size,
                         ),
                         _ => (
-                            RmMem::from_scale_index_base(scale_raw, index_raw, base_raw),
-                            default_offset_size,
+                            RmMemRegs::from_scale_index_base(scale_raw, get_gpr(index_raw, flags.x, address_size.bits()), get_gpr(base_raw, flags.b, address_size.bits())),
+                            default_disp_size,
                         ),
                     }
                 }
                 0b101 if mod_raw == 0b00 => {
                     if mode == CpuMode::Long64 {
-                        match operand_size {
-                            OpSize32 => (Scale0(EIP), NumBytes(4)),
-                            OpSize64 => (Scale0(RIP), NumBytes(4)),
+                        match address_size {
+                            Size32 => (SingleReg(EIP), NumBytes(4)),
+                            Size64 => (SingleReg(RIP), NumBytes(4)),
+                            _ => panic!("Mode Long64 can only have address size 32 or 64, got {:?}", address_size),
                         }
                     } else {
                         (DispOnly, NumBytes(4))
                     }
                 }
                 _ => (
-                    Scale0(get_gpr(rm_raw, flags.b, operand_size)),
-                    default_offset_size,
+                    SingleReg(get_gpr(rm_raw, flags.b, address_size.bits())),
+                    default_disp_size,
                 ),
             }
         };
+        let disp = match disp_size {
+            NumBytes(0) => 0,
+            NumBytes(1) => i32::from(bytes.next().unwrap()),
+            NumBytes(2) => i32::from(u16::from_le_bytes([bytes.next().unwrap(), bytes.next().unwrap()])), // FIXME (check): signedness shouldn't matter here?
+            NumBytes(4) => i32::from_le_bytes([bytes.next().unwrap(), bytes.next().unwrap(), bytes.next().unwrap(), bytes.next().unwrap()]),
+            _ => unreachable!(),
+        };
+        Rm::Mem(operand_size.bytes(), rm_regs, disp)
     };
     ModRM { reg, rm }
 }
